@@ -1,0 +1,75 @@
+WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
+newline = _{ ("\r"? ~ "\n")+ }
+line_ending = _{ newline+ }
+ident_char = _{ ASCII_ALPHANUMERIC | "_" }
+keyword = { "contract" | "fn" | "storage" | "let" | "mut" | "if" | "elif" | "else" | "while" | "return" | "break" | "continue" | "pass" | "pub" | "true" | "false" }
+keyword_start = { keyword ~ !ident_char }
+
+program = { SOI ~ newline* ~ item* ~ newline* ~ EOI }
+item = _{ contract_def | function_def }
+
+contract_def = { "contract" ~ identifier ~ contract_params? ~ ":" ~ newline* ~ block_contract ~ newline* }
+contract_params = { "(" ~ param_list? ~ ")" }
+param_list = { param ~ ("," ~ param)* ~ (",")? }
+param = { identifier ~ ":" ~ ty }
+
+block_contract = { "{" ~ newline* ~ (contract_item | newline)* ~ "}" }
+contract_item = { storage_decl | function_def }
+
+storage_decl = { "storage" ~ identifier ~ ":" ~ ty ~ storage_initializer? ~ line_ending }
+storage_initializer = { "=" ~ expr }
+
+function_def = { visibility? ~ "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ return_type? ~ ":" ~ newline* ~ block_function ~ newline* }
+visibility = { "pub" }
+return_type = { "->" ~ ty }
+
+block_function = { "{" ~ newline* ~ (statement | newline)* ~ "}" }
+statement = _{ let_stmt | assign_stmt | if_stmt | while_stmt | return_stmt | break_stmt | continue_stmt | pass_stmt | expr_stmt }
+
+let_stmt = { "let" ~ mutability? ~ identifier ~ ":" ~ ty ~ "=" ~ expr ~ line_ending }
+mutability = { "mut" }
+assign_stmt = { assign_target ~ "=" ~ expr ~ line_ending }
+assign_target = { identifier ~ assign_suffix* }
+assign_suffix = _{ ("." ~ identifier) | ("[" ~ expr ~ "]") }
+
+if_stmt = { "if" ~ expr ~ ":" ~ newline* ~ block_function ~ (newline* ~ "elif" ~ expr ~ ":" ~ newline* ~ block_function)* ~ (newline* ~ "else" ~ ":" ~ newline* ~ block_function)? ~ newline* }
+while_stmt = { "while" ~ expr ~ ":" ~ newline* ~ block_function ~ newline* }
+return_stmt = { "return" ~ expr? ~ line_ending }
+break_stmt = { "break" ~ line_ending }
+continue_stmt = { "continue" ~ line_ending }
+pass_stmt = { "pass" ~ line_ending }
+expr_stmt = { expr ~ line_ending }
+
+expr = { logical_or }
+logical_or = { logical_and ~ ("or" ~ logical_and)* }
+logical_and = { equality ~ ("and" ~ equality)* }
+equality = { comparison ~ (("==" | "!=") ~ comparison)* }
+comparison = { additive ~ (("<" | ">" | "<=" | ">=") ~ additive)* }
+additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
+multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
+unary = { ("-" | "not") ~ unary | postfix }
+postfix = { primary ~ postfix_op* }
+postfix_op = _{ call_args | index_access | attribute_access }
+call_args = { "(" ~ arg_list? ~ ")" }
+arg_list = { expr ~ ("," ~ expr)* ~ (",")? }
+index_access = { "[" ~ expr ~ "]" }
+attribute_access = { "." ~ identifier }
+primary = { literal | identifier | "(" ~ expr ~ ")" }
+
+literal = _{ address_literal | bytes_literal | string_literal | number_literal | bool_literal }
+address_literal = @{ "0x" ~ ASCII_HEX_DIGIT{40} }
+bytes_literal = @{ "b\"" ~ bytes_inner* ~ "\"" }
+bytes_inner = _{ bytes_escape | !("\"" | "\n") ~ ANY }
+bytes_escape = _{ "\\" ~ ("\\" | "\"" | "n" | "r" | "t" | "0") }
+string_literal = @{ "\"" ~ string_inner* ~ "\"" }
+string_inner = _{ string_escape | !("\"" | "\n") ~ ANY }
+string_escape = _{ "\\" ~ ("\\" | "\"" | "n" | "r" | "t" | "0") }
+number_literal = @{ ("0x" ~ ASCII_HEX_DIGIT+ ) | ASCII_DIGIT+ }
+bool_literal = { "true" | "false" }
+
+identifier = @{ !keyword_start ~ (ASCII_ALPHA | "_") ~ ident_char* }
+
+ty = _{ map_type | primitive_type }
+map_type = { "map" ~ "[" ~ ty ~ "," ~ ty ~ "]" }
+primitive_type = { "u128" | "bool" | "bytes" | "address" }

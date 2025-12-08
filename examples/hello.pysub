@@ -1,1 +1,9 @@
-# Placeholder pysub example
+contract Greeter:
+    storage message: bytes = b"hello"
+
+    fn instantiate(initial_message: bytes):
+        storage_set("message", initial_message)
+        emit_event("instantiate", initial_message)
+
+    fn greet() -> bytes:
+        return storage_get("message")

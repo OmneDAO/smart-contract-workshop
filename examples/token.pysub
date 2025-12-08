@@ -1,1 +1,23 @@
-# Placeholder token pysub example
+contract Token:
+    storage total_supply: u128 = 0
+    storage balances: map[address, u128]
+
+    fn instantiate(initial_supply: u128, owner: address):
+        total_supply = initial_supply
+        storage_set("balances", owner, initial_supply)
+        emit_event("instantiate", owner, initial_supply)
+
+    fn balance_of(target: address) -> u128:
+        return storage_get("balances", target)
+
+    fn transfer(to: address, amount: u128):
+        let caller: address = get_caller()
+        let caller_balance: u128 = storage_get("balances", caller)
+        if caller_balance < amount:
+            abort("INSUFFICIENT_BALANCE")
+        let new_caller_balance: u128 = caller_balance - amount
+        let recipient_balance: u128 = storage_get("balances", to)
+        let new_recipient_balance: u128 = recipient_balance + amount
+        storage_set("balances", caller, new_caller_balance)
+        storage_set("balances", to, new_recipient_balance)
+        emit_event("transfer", caller, to, amount)
