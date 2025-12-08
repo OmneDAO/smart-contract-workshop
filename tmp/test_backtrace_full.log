@@ -1,0 +1,112 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/pysub_compiler-5c0cf6d86afca0d9)
+
+running 1 test
+test ast::tests::parses_contract_and_function ... FAILED
+
+failures:
+
+---- ast::tests::parses_contract_and_function stdout ----
+
+thread 'ast::tests::parses_contract_and_function' panicked at compiler/src/ast.rs:1028:46:
+build: InvalidLiteral { literal: "1" }
+stack backtrace:
+   0:        0x10a5784de - std::backtrace_rs::backtrace::libunwind::trace::h0d77f66cff0ee92a
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1:        0x10a5784de - std::backtrace_rs::backtrace::trace_unsynchronized::h8ad8693b125c09a6
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2:        0x10a5784de - std::sys::backtrace::_print_fmt::haea0c12219927921
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/backtrace.rs:66:9
+   3:        0x10a5784de - <std::sys::backtrace::BacktraceLock::print::DisplayBacktrace as core::fmt::Display>::fmt::h9d61884e08d3316c
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/backtrace.rs:39:26
+   4:        0x10a5948a3 - core::fmt::rt::Argument::fmt::h99fa920ea7062e63
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/fmt/rt.rs:181:76
+   5:        0x10a5948a3 - core::fmt::write::ha7e42c8550512cfb
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/fmt/mod.rs:1446:25
+   6:        0x10a575e72 - std::io::default_write_fmt::hd68053297cd38672
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/io/mod.rs:639:11
+   7:        0x10a575e72 - std::io::Write::write_fmt::h3b684f9f31679e8c
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/io/mod.rs:1914:13
+   8:        0x10a578322 - std::sys::backtrace::BacktraceLock::print::h972ba80fe25d05e0
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/backtrace.rs:42:9
+   9:        0x10a579a00 - std::panicking::default_hook::{{closure}}::h05218cad2d40e027
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:300:22
+  10:        0x10a579865 - std::panicking::default_hook::hd9c10aab77439366
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:324:9
+  11:        0x10a53a06f - <alloc::boxed::Box<F,A> as core::ops::function::Fn<Args>>::call::h61a511a4e3e18eba
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/alloc/src/boxed.rs:1980:9
+  12:        0x10a53a06f - test::test_main_with_exit_callback::{{closure}}::hecb4a586c09802d2
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:145:21
+  13:        0x10a57a5d3 - <alloc::boxed::Box<F,A> as core::ops::function::Fn<Args>>::call::h8939e345c877455f
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/alloc/src/boxed.rs:1980:9
+  14:        0x10a57a5d3 - std::panicking::rust_panic_with_hook::hb1fd245af5672dcd
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:841:13
+  15:        0x10a57a1b8 - std::panicking::begin_panic_handler::{{closure}}::hf868e10834208483
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:706:13
+  16:        0x10a5789a9 - std::sys::backtrace::__rust_end_short_backtrace::haac0e906ed75717a
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/backtrace.rs:168:18
+  17:        0x10a579df4 - __rustc[4794b31dd7191200]::rust_begin_unwind
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:697:5
+  18:        0x10a59d16f - core::panicking::panic_fmt::hcd04e353e02878fd
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/panicking.rs:75:14
+  19:        0x10a59d615 - core::result::unwrap_failed::h49c1715b45bdde55
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/result.rs:1732:5
+  20:        0x10a4686a8 - core::result::Result<T,E>::expect::hbd041731b6d967cc
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/result.rs:1089:23
+  21:        0x10a483b8d - pysub_compiler::ast::tests::parses_contract_and_function::h8e34c52f2f7f4c47
+                               at /Users/gregbrown/github/omne/smart-contract-workshop/compiler/src/ast.rs:1028:23
+  22:        0x10a486bc9 - pysub_compiler::ast::tests::parses_contract_and_function::{{closure}}::h9eb4ac630fe89e7c
+                               at /Users/gregbrown/github/omne/smart-contract-workshop/compiler/src/ast.rs:1024:38
+  23:        0x10a45c628 - core::ops::function::FnOnce::call_once::h38aa33ee5436f510
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/ops/function.rs:250:5
+  24:        0x10a53f09b - core::ops::function::FnOnce::call_once::h95dbd560fc063d66
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/ops/function.rs:250:5
+  25:        0x10a53f09b - test::__rust_begin_short_backtrace::h66e63d569e6112a3
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:648:18
+  26:        0x10a53e33a - test::run_test_in_process::{{closure}}::h61448f6faac6d4ab
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:671:60
+  27:        0x10a53e33a - <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once::h6ccf6976ef8ea3f2
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/panic/unwind_safe.rs:272:9
+  28:        0x10a53e33a - std::panicking::try::do_call::hcde840ac6cd05a9c
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:589:40
+  29:        0x10a53e33a - std::panicking::try::h4c7365038635237c
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:552:19
+  30:        0x10a53e33a - std::panic::catch_unwind::h2279084bf3f5852f
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panic.rs:359:14
+  31:        0x10a53e33a - test::run_test_in_process::hb599a188743205ed
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:671:27
+  32:        0x10a53e33a - test::run_test::{{closure}}::hf68e7335c537a0d9
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:592:43
+  33:        0x10a5029e3 - test::run_test::{{closure}}::h72f1600c40a88c42
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/test/src/lib.rs:622:41
+  34:        0x10a5029e3 - std::sys::backtrace::__rust_begin_short_backtrace::hcf3e00d52022b581
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/backtrace.rs:152:18
+  35:        0x10a5060c7 - std::thread::Builder::spawn_unchecked_::{{closure}}::{{closure}}::h7a47f93b751a8664
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/thread/mod.rs:559:17
+  36:        0x10a5060c7 - <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once::h5ba98e7984e3d611
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/panic/unwind_safe.rs:272:9
+  37:        0x10a5060c7 - std::panicking::try::do_call::h45c110a80eb0bdc7
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:589:40
+  38:        0x10a5060c7 - std::panicking::try::h7034936d727767fb
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panicking.rs:552:19
+  39:        0x10a5060c7 - std::panic::catch_unwind::hb9c6dda1781758f5
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/panic.rs:359:14
+  40:        0x10a5060c7 - std::thread::Builder::spawn_unchecked_::{{closure}}::h34acf9fca3df1f24
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/thread/mod.rs:557:30
+  41:        0x10a5060c7 - core::ops::function::FnOnce::call_once{{vtable.shim}}::hf272d38c3a4890dc
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/ops/function.rs:250:5
+  42:        0x10a57bb7b - <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once::h386d2a0d3e8e149f
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/alloc/src/boxed.rs:1966:9
+  43:        0x10a57bb7b - <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once::h41fa03c1b655af8f
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/alloc/src/boxed.rs:1966:9
+  44:        0x10a57bb7b - std::sys::pal::unix::thread::Thread::new::thread_start::h110981749b5ebcd9
+                               at /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/std/src/sys/pal/unix/thread.rs:97:17
+  45:     0x7ff8064ebe05 - __pthread_start
+
+
+failures:
+    ast::tests::parses_contract_and_function
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p pysub-compiler --lib`

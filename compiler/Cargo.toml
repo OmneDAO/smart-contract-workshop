@@ -9,3 +9,7 @@ license = "Apache-2.0"
 pest = { version = "2.7", default-features = false, features = ["std"] }
 pest_derive = "2.7"
 thiserror = "1.0"
+wasm-encoder = "0.36"
+
+[dev-dependencies]
+wasmparser = "0.118"

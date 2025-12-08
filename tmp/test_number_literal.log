@@ -1,0 +1,26 @@
+   Compiling pysub-compiler v0.1.0 (/Users/gregbrown/github/omne/smart-contract-workshop/compiler)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src/lib.rs (target/debug/deps/pysub_compiler-5c0cf6d86afca0d9)
+
+running 1 test
+parse_expression entering rule: expr
+parse_expression entering rule: logical_or
+parse number literal: "0"
+assign value rule: expr
+parse_expression entering rule: expr
+parse_expression entering rule: logical_or
+binary op pair rule: multiplicative text "1"
+
+thread 'ast::tests::parses_contract_and_function' panicked at compiler/src/ast.rs:1036:46:
+build: InvalidLiteral { literal: "1" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ast::tests::parses_contract_and_function ... FAILED
+
+failures:
+
+failures:
+    ast::tests::parses_contract_and_function
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p pysub-compiler --lib`

@@ -1,0 +1,21 @@
+   Compiling pysub-compiler v0.1.0 (/Users/gregbrown/github/omne/smart-contract-workshop/compiler)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.81s
+     Running tests/codegen.rs (target/debug/deps/codegen-3f663e15ec142896)
+
+running 1 test
+block child: return_stmt
+lower_function add body len 0
+
+thread 'lowering_records_function_signatures_and_body' panicked at compiler/tests/codegen.rs:7:43:
+IR lowering: Ir(MissingReturn { function: "add" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test lowering_records_function_signatures_and_body ... FAILED
+
+failures:
+
+failures:
+    lowering_records_function_signatures_and_body
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p pysub-compiler --test codegen`

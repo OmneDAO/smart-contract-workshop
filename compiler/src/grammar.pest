@@ -42,12 +42,18 @@ pass_stmt = { "pass" ~ line_ending }
 expr_stmt = { expr ~ line_ending }
 
 expr = { logical_or }
-logical_or = { logical_and ~ ("or" ~ logical_and)* }
-logical_and = { equality ~ ("and" ~ equality)* }
-equality = { comparison ~ (("==" | "!=") ~ comparison)* }
-comparison = { additive ~ (("<" | ">" | "<=" | ">=") ~ additive)* }
-additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
-multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
+logical_or = { logical_and ~ (logical_or_op ~ logical_and)* }
+logical_or_op = { "or" }
+logical_and = { equality ~ (logical_and_op ~ equality)* }
+logical_and_op = { "and" }
+equality = { comparison ~ (equality_op ~ comparison)* }
+equality_op = { "==" | "!=" }
+comparison = { additive ~ (comparison_op ~ additive)* }
+comparison_op = { "<" | ">" | "<=" | ">=" }
+additive = { multiplicative ~ (additive_op ~ multiplicative)* }
+additive_op = { "+" | "-" }
+multiplicative = { unary ~ (multiplicative_op ~ unary)* }
+multiplicative_op = { "*" | "/" | "%" }
 unary = { ("-" | "not") ~ unary | postfix }
 postfix = { primary ~ postfix_op* }
 postfix_op = _{ call_args | index_access | attribute_access }
