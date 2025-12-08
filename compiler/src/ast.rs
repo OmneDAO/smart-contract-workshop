@@ -269,7 +269,7 @@ fn parse_contract(pair: Pair<Rule>) -> Result<Contract, AstError> {
         .next()
         .ok_or(AstError::MissingChild("contract block"))?;
     if next.as_rule() == Rule::contract_params {
-        params = parse_param_list(next)?;
+        params = parse_contract_params(next)?;
         next = inner
             .next()
             .ok_or(AstError::MissingChild("contract block"))?;
@@ -339,6 +339,15 @@ fn parse_storage_decl(pair: Pair<Rule>) -> Result<StorageField, AstError> {
         ty,
         initializer,
     })
+}
+
+fn parse_contract_params(pair: Pair<Rule>) -> Result<Vec<Param>, AstError> {
+    let mut inner = pair.into_inner();
+    if let Some(param_list) = inner.next() {
+        parse_param_list(param_list)
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 fn parse_function(pair: Pair<Rule>) -> Result<Function, AstError> {
@@ -424,12 +433,32 @@ fn parse_param_list_from_pairs(pairs: Pairs<Rule>) -> Result<Vec<Param>, AstErro
 fn parse_block(pair: Pair<Rule>) -> Result<Vec<Statement>, AstError> {
     let mut statements = Vec::new();
     for node in pair.into_inner() {
-        if node.as_rule() == Rule::statement {
-            let stmt_pair = node
-                .into_inner()
-                .next()
-                .ok_or(AstError::MissingChild("statement"))?;
-            statements.push(parse_statement(stmt_pair)?);
+        match node.as_rule() {
+            Rule::statement => {
+                let stmt_pair = node
+                    .into_inner()
+                    .next()
+                    .ok_or(AstError::MissingChild("statement"))?;
+                statements.push(parse_statement(stmt_pair)?);
+            }
+            Rule::let_stmt
+            | Rule::assign_stmt
+            | Rule::if_stmt
+            | Rule::while_stmt
+            | Rule::return_stmt
+            | Rule::break_stmt
+            | Rule::continue_stmt
+            | Rule::pass_stmt
+            | Rule::expr_stmt => {
+                statements.push(parse_statement(node)?);
+            }
+            Rule::newline => {}
+            other => {
+                return Err(AstError::UnexpectedRule {
+                    context: "block",
+                    found: other,
+                });
+            }
         }
     }
     Ok(statements)
@@ -484,6 +513,79 @@ fn parse_let_stmt(pair: Pair<Rule>) -> Result<Statement, AstError> {
         ty,
         value,
     })
+}
+
+fn parse_postfix(pair: Pair<Rule>) -> Result<Expression, AstError> {
+    let mut inner = pair.into_inner();
+    let mut expr = parse_primary(
+        inner
+            .next()
+            .ok_or(AstError::MissingChild("postfix primary"))?,
+    )?;
+
+    for next in inner {
+        expr = apply_postfix(expr, next)?;
+    }
+
+    Ok(expr)
+}
+
+fn apply_postfix(expr: Expression, pair: Pair<Rule>) -> Result<Expression, AstError> {
+    match pair.as_rule() {
+        Rule::call_args => {
+            let args = parse_call_args(pair)?;
+            Ok(Expression::Call {
+                callee: Box::new(expr),
+                args,
+            })
+        }
+        Rule::index_access => {
+            let index_pair = pair
+                .into_inner()
+                .next()
+                .ok_or(AstError::MissingChild("index"))?;
+            let index = parse_expression(index_pair)?;
+            Ok(Expression::Index {
+                target: Box::new(expr),
+                index: Box::new(index),
+            })
+        }
+        Rule::attribute_access => {
+            let ident_pair = pair
+                .into_inner()
+                .next()
+                .ok_or(AstError::MissingChild("attribute"))?;
+            let ident = parse_identifier(ident_pair)?;
+            Ok(Expression::Attribute {
+                target: Box::new(expr),
+                attribute: ident,
+            })
+        }
+        Rule::postfix_op => {
+            let mut inner = pair.into_inner();
+            let op = inner.next().ok_or(AstError::MissingChild("postfix op"))?;
+            apply_postfix(expr, op)
+        }
+        Rule::newline => Ok(expr),
+        other => Err(AstError::UnexpectedRule {
+            context: "postfix",
+            found: other,
+        }),
+    }
+}
+
+fn parse_call_args(pair: Pair<Rule>) -> Result<Vec<Expression>, AstError> {
+    let mut args = Vec::new();
+    if let Some(args_pair) = pair.into_inner().next() {
+        if args_pair.as_rule() == Rule::arg_list {
+            for arg in args_pair.into_inner() {
+                if arg.as_rule() == Rule::expr {
+                    args.push(parse_expression(arg)?);
+                }
+            }
+        }
+    }
+    Ok(args)
 }
 
 fn parse_assign_stmt(pair: Pair<Rule>) -> Result<Statement, AstError> {
@@ -759,83 +861,6 @@ fn parse_unary(pair: Pair<Rule>) -> Result<Expression, AstError> {
             })
         }
     }
-}
-
-fn parse_postfix(pair: Pair<Rule>) -> Result<Expression, AstError> {
-    let mut inner = pair.into_inner();
-    let mut expr = parse_primary(
-        inner
-            .next()
-            .ok_or(AstError::MissingChild("postfix primary"))?,
-    )?;
-
-    for next in inner {
-        match next.as_rule() {
-            Rule::postfix_op => {
-                let mut parts = next.into_inner();
-                let op = parts.next().ok_or(AstError::MissingChild("postfix op"))?;
-                match op.as_rule() {
-                    Rule::call_args => {
-                        let args = parse_call_args(op)?;
-                        expr = Expression::Call {
-                            callee: Box::new(expr),
-                            args,
-                        };
-                    }
-                    Rule::index_access => {
-                        let index_pair = op
-                            .into_inner()
-                            .next()
-                            .ok_or(AstError::MissingChild("index"))?;
-                        let index = parse_expression(index_pair)?;
-                        expr = Expression::Index {
-                            target: Box::new(expr),
-                            index: Box::new(index),
-                        };
-                    }
-                    Rule::attribute_access => {
-                        let ident_pair = op
-                            .into_inner()
-                            .next()
-                            .ok_or(AstError::MissingChild("attribute"))?;
-                        let ident = parse_identifier(ident_pair)?;
-                        expr = Expression::Attribute {
-                            target: Box::new(expr),
-                            attribute: ident,
-                        };
-                    }
-                    other => {
-                        return Err(AstError::UnexpectedRule {
-                            context: "postfix",
-                            found: other,
-                        });
-                    }
-                }
-            }
-            other => {
-                return Err(AstError::UnexpectedRule {
-                    context: "postfix",
-                    found: other,
-                });
-            }
-        }
-    }
-
-    Ok(expr)
-}
-
-fn parse_call_args(pair: Pair<Rule>) -> Result<Vec<Expression>, AstError> {
-    let mut args = Vec::new();
-    if let Some(args_pair) = pair.into_inner().next() {
-        if args_pair.as_rule() == Rule::arg_list {
-            for arg in args_pair.into_inner() {
-                if arg.as_rule() == Rule::expr {
-                    args.push(parse_expression(arg)?);
-                }
-            }
-        }
-    }
-    Ok(args)
 }
 
 fn parse_primary(pair: Pair<Rule>) -> Result<Expression, AstError> {

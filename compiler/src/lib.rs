@@ -19,6 +19,9 @@ pub enum CompilerError {
     #[error("semantic error: {0}")]
     Semantics(#[from] semantics::SemanticError),
 
+    #[error("ir lowering error: {0}")]
+    Ir(#[from] ir::IrError),
+
     #[error("failed to read `{path}`: {source}")]
     Io {
         #[source]
@@ -50,7 +53,7 @@ pub fn compile_file(path: impl AsRef<Path>) -> Result<ast::Program, CompilerErro
 /// This currently returns a placeholder IR module until lowering is implemented.
 pub fn compile_to_ir(source: &str) -> Result<ir::Module, CompilerError> {
     let program = compile_source(source)?;
-    Ok(ir::lower_to_ir(&program))
+    Ok(ir::lower_to_ir(&program)?)
 }
 
 /// Compile pysub source directly to WebAssembly bytes.
