@@ -44,3 +44,20 @@ pub fn compile_file(path: impl AsRef<Path>) -> Result<ast::Program, CompilerErro
     })?;
     compile_source(&source)
 }
+
+/// Compile pysub source to the intermediate representation.
+///
+/// This currently returns a placeholder IR module until lowering is implemented.
+pub fn compile_to_ir(source: &str) -> Result<ir::Module, CompilerError> {
+    let program = compile_source(source)?;
+    Ok(ir::lower_to_ir(&program))
+}
+
+/// Compile pysub source directly to WebAssembly bytes.
+///
+/// Code generation is not yet implemented; this function exists to wire future
+/// stages into the existing compile helpers.
+pub fn compile_to_wasm(source: &str) -> Result<Vec<u8>, CompilerError> {
+    let module = compile_to_ir(source)?;
+    Ok(codegen_wasm::emit_wasm(&module))
+}
