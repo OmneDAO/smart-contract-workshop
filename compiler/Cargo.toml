@@ -1,0 +1,8 @@
+[package]
+name = "pysub-compiler"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal pysub to WASM compiler (skeleton)"
+license = "Apache-2.0"
+
+[dependencies]
