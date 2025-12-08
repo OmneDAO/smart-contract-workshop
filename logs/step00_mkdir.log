@@ -1,0 +1,2 @@
+mkdir -p logs
+exit_code: 0
