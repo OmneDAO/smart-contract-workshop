@@ -1,0 +1,15 @@
+# Build outputs
+/target
+**/target
+
+# Artifacts and logs
+/artifacts/
+/logs/
+
+# Cargo
+Cargo.lock
+
+# IDE/editor
+/.vscode/
+.idea/
+.DS_Store
