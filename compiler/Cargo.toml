@@ -6,3 +6,6 @@ description = "Minimal pysub to WASM compiler (skeleton)"
 license = "Apache-2.0"
 
 [dependencies]
+pest = { version = "2.7", default-features = false, features = ["std"] }
+pest_derive = "2.7"
+thiserror = "1.0"
