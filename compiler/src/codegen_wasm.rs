@@ -1,12 +1,15 @@
 //! WebAssembly code generation for pysub compiler.
 
+use std::collections::HashMap;
+
 use wasm_encoder::{
-    CodeSection, ExportSection, Function as WasmFunction, FunctionSection, Instruction, Module,
-    TypeSection, ValType,
+    CodeSection, EntityType, ExportSection, Function as WasmFunction, FunctionSection,
+    ImportSection, Instruction, Module, TypeSection, ValType,
 };
 
 use crate::ir::{
-    BinaryOp, Contract, Expr, Function as IrFunction, FunctionBody, Module as IrModule, ValueType,
+    BinaryOp, Contract, Expr, Function as IrFunction, FunctionBody, HostFunction,
+    Module as IrModule, ValueType,
 };
 
 /// Emit WebAssembly bytes from an IR module.
@@ -27,38 +30,84 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
         return wasm.finish();
     }
 
+    let host_functions = ir_module.used_host_functions();
+    let mut host_function_indices = HashMap::new();
+
     let mut type_section = TypeSection::new();
+    let mut import_section = ImportSection::new();
     let mut function_section = FunctionSection::new();
     let mut export_section = ExportSection::new();
     let mut code_section = CodeSection::new();
 
-    for (func_index, (function, export_name)) in all_functions.iter().enumerate() {
-        let params = function
-            .params
-            .iter()
-            .map(|param| convert_type(param.ty))
-            .collect::<Vec<_>>();
-        let results = function
-            .return_type
-            .iter()
-            .map(|ty| convert_type(*ty))
-            .collect::<Vec<_>>();
+    let mut next_type_index: u32 = 0;
 
-        type_section.function(params.into_iter(), results.into_iter());
-        function_section.function(func_index as u32);
-        export_section.export(
-            export_name,
-            wasm_encoder::ExportKind::Func,
-            func_index as u32,
+    for host_function in &host_functions {
+        let type_index = next_type_index;
+        append_function_type(
+            &mut type_section,
+            host_function.params(),
+            host_function.return_type(),
+        );
+        next_type_index += 1;
+
+        import_section.import(
+            host_function.module(),
+            host_function.field(),
+            EntityType::Function(type_index),
         );
 
+        let function_index = host_function_indices.len() as u32;
+        host_function_indices.insert(*host_function, function_index);
+    }
+
+    let imported_function_count = host_function_indices.len() as u32;
+
+    let mut defined_type_indices = Vec::with_capacity(all_functions.len());
+
+    for (function, _) in &all_functions {
+        let type_index = next_type_index;
+        let param_types: Vec<ValueType> = function.params.iter().map(|param| param.ty).collect();
+        append_function_type(&mut type_section, &param_types, function.return_type);
+        next_type_index += 1;
+        defined_type_indices.push(type_index);
+    }
+
+    for type_index in &defined_type_indices {
+        function_section.function(*type_index);
+    }
+
+    for (func_index, (function, export_name)) in all_functions.iter().enumerate() {
+        let resolved_index = imported_function_count + func_index as u32;
+
+        export_section.export(export_name, wasm_encoder::ExportKind::Func, resolved_index);
+
+        if export_name == "main" {
+            export_section.export(
+                "axiom_entry_main",
+                wasm_encoder::ExportKind::Func,
+                resolved_index,
+            );
+        }
+
+        if let Some((contract, function_name)) = export_name.split_once("::") {
+            let runtime_export = format!("axiom_contract::{}::{}", contract, function_name);
+            export_section.export(
+                runtime_export.as_str(),
+                wasm_encoder::ExportKind::Func,
+                resolved_index,
+            );
+        }
+
         let mut body = WasmFunction::new(Vec::new());
-        emit_function_body(function, &mut body);
+        emit_function_body(function, &mut body, &host_function_indices);
         body.instruction(&Instruction::End);
         code_section.function(&body);
     }
 
     wasm.section(&type_section);
+    if !host_functions.is_empty() {
+        wasm.section(&import_section);
+    }
     wasm.section(&function_section);
     wasm.section(&export_section);
     wasm.section(&code_section);
@@ -73,18 +122,26 @@ fn collect_contract_functions(contract: &Contract, output: &mut Vec<(IrFunction,
     }
 }
 
-fn emit_function_body(function: &IrFunction, body: &mut WasmFunction) {
+fn emit_function_body(
+    function: &IrFunction,
+    body: &mut WasmFunction,
+    host_function_indices: &HashMap<HostFunction, u32>,
+) {
     match &function.body {
         FunctionBody::Return { value } => {
             if let Some(expr) = value {
-                emit_expr(expr, body);
+                emit_expr(expr, body, host_function_indices);
             }
             body.instruction(&Instruction::Return);
         }
     }
 }
 
-fn emit_expr(expr: &Expr, body: &mut WasmFunction) {
+fn emit_expr(
+    expr: &Expr,
+    body: &mut WasmFunction,
+    host_function_indices: &HashMap<HostFunction, u32>,
+) {
     match expr {
         Expr::Param { index, .. } => {
             body.instruction(&Instruction::LocalGet(*index));
@@ -101,8 +158,8 @@ fn emit_expr(expr: &Expr, body: &mut WasmFunction) {
             right,
             ty,
         } => {
-            emit_expr(left, body);
-            emit_expr(right, body);
+            emit_expr(left, body, host_function_indices);
+            emit_expr(right, body, host_function_indices);
             match (op, ty) {
                 (BinaryOp::Add, ValueType::I32) => body.instruction(&Instruction::I32Add),
                 (BinaryOp::Add, ValueType::I64) => body.instruction(&Instruction::I64Add),
@@ -116,6 +173,16 @@ fn emit_expr(expr: &Expr, body: &mut WasmFunction) {
                 (BinaryOp::RemUInt, ValueType::I64) => body.instruction(&Instruction::I64RemU),
             };
         }
+        Expr::HostCall { function, args } => {
+            for arg in args {
+                emit_expr(arg, body, host_function_indices);
+            }
+            let index = host_function_indices
+                .get(function)
+                .copied()
+                .expect("host function must be registered in import section");
+            body.instruction(&Instruction::Call(index));
+        }
     };
 }
 
@@ -124,4 +191,14 @@ fn convert_type(value_type: ValueType) -> ValType {
         ValueType::I32 => ValType::I32,
         ValueType::I64 => ValType::I64,
     }
+}
+
+fn append_function_type(
+    type_section: &mut TypeSection,
+    params: &[ValueType],
+    result: Option<ValueType>,
+) {
+    let param_types = params.iter().map(|ty| convert_type(*ty));
+    let result_types = result.into_iter().map(convert_type);
+    type_section.function(param_types, result_types);
 }

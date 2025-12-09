@@ -21,6 +21,9 @@ fn validates_token_example() {
 #[test]
 fn rejects_duplicate_storage_field() {
     let source = r#"
+fn main() -> u128:
+    return 0
+
 contract Dup:
     storage value: u128 = 0
     storage value: u128 = 1
@@ -36,6 +39,9 @@ contract Dup:
 #[test]
 fn rejects_invalid_map_key() {
     let source = r#"
+fn main() -> u128:
+    return 0
+
 contract BadMap:
     storage ledger: map[u128, u128]
 "#;
@@ -50,6 +56,9 @@ contract BadMap:
 #[test]
 fn rejects_duplicate_parameters() {
     let source = r#"
+fn main() -> u128:
+    return 0
+
 fn clash(a: u128, a: bool):
     return 0
 "#;
