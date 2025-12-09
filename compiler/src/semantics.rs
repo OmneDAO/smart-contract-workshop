@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use axiom_runtime::abi;
 use thiserror::Error;
 
 use crate::ast::{Contract, Function, PrimitiveType, Program, Type};
@@ -35,6 +36,9 @@ pub enum SemanticError {
         expected: String,
         found: String,
     },
+
+    #[error("`{function}` is a reserved function name")]
+    ReservedFunctionName { function: String },
 }
 
 pub struct SemanticAnalyzer;
@@ -61,6 +65,12 @@ impl SemanticAnalyzer {
                 });
             }
             Self::validate_function(function)?;
+
+            if function.name.as_str() == abi::ENTRY_EXPORT {
+                return Err(SemanticError::ReservedFunctionName {
+                    function: abi::ENTRY_EXPORT.to_string(),
+                });
+            }
 
             if function.name.as_str() == "main" {
                 has_main = true;
@@ -125,6 +135,12 @@ impl SemanticAnalyzer {
                 });
             }
             Self::validate_function(function)?;
+
+            if function.name.as_str() == abi::ENTRY_EXPORT {
+                return Err(SemanticError::ReservedFunctionName {
+                    function: abi::ENTRY_EXPORT.to_string(),
+                });
+            }
         }
 
         Ok(())
