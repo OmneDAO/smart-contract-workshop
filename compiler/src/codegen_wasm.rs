@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use axiom_runtime::abi;
 use wasm_encoder::{
     CodeSection, EntityType, ExportSection, Function as WasmFunction, FunctionSection,
     ImportSection, Instruction, Module, TypeSection, ValType,
@@ -12,21 +13,35 @@ use crate::ir::{
     Module as IrModule, ValueType,
 };
 
+struct FunctionBinding {
+    function: IrFunction,
+    export_names: Vec<String>,
+}
+
 /// Emit WebAssembly bytes from an IR module.
 pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
     let mut wasm = Module::new();
 
-    let mut all_functions: Vec<(IrFunction, String)> = ir_module
+    let mut bindings: Vec<FunctionBinding> = ir_module
         .functions
         .iter()
-        .map(|function| (function.clone(), function.name.clone()))
+        .map(|function| {
+            let mut export_names = vec![function.name.clone()];
+            if function.name == abi::LEGACY_ENTRY_EXPORT {
+                export_names.push(abi::ENTRY_EXPORT.to_string());
+            }
+            FunctionBinding {
+                function: function.clone(),
+                export_names,
+            }
+        })
         .collect();
 
     for contract in &ir_module.contracts {
-        collect_contract_functions(contract, &mut all_functions);
+        collect_contract_functions(contract, &mut bindings);
     }
 
-    if all_functions.is_empty() {
+    if bindings.is_empty() {
         return wasm.finish();
     }
 
@@ -62,9 +77,10 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
 
     let imported_function_count = host_function_indices.len() as u32;
 
-    let mut defined_type_indices = Vec::with_capacity(all_functions.len());
+    let mut defined_type_indices = Vec::with_capacity(bindings.len());
 
-    for (function, _) in &all_functions {
+    for binding in &bindings {
+        let function = &binding.function;
         let type_index = next_type_index;
         let param_types: Vec<ValueType> = function.params.iter().map(|param| param.ty).collect();
         append_function_type(&mut type_section, &param_types, function.return_type);
@@ -76,30 +92,15 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
         function_section.function(*type_index);
     }
 
-    for (func_index, (function, export_name)) in all_functions.iter().enumerate() {
+    for (func_index, binding) in bindings.iter().enumerate() {
         let resolved_index = imported_function_count + func_index as u32;
 
-        export_section.export(export_name, wasm_encoder::ExportKind::Func, resolved_index);
-
-        if export_name == "main" {
-            export_section.export(
-                "axiom_entry_main",
-                wasm_encoder::ExportKind::Func,
-                resolved_index,
-            );
-        }
-
-        if let Some((contract, function_name)) = export_name.split_once("::") {
-            let runtime_export = format!("axiom_contract::{}::{}", contract, function_name);
-            export_section.export(
-                runtime_export.as_str(),
-                wasm_encoder::ExportKind::Func,
-                resolved_index,
-            );
+        for export_name in &binding.export_names {
+            export_section.export(export_name, wasm_encoder::ExportKind::Func, resolved_index);
         }
 
         let mut body = WasmFunction::new(Vec::new());
-        emit_function_body(function, &mut body, &host_function_indices);
+        emit_function_body(&binding.function, &mut body, &host_function_indices);
         body.instruction(&Instruction::End);
         code_section.function(&body);
     }
@@ -115,10 +116,19 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
     wasm.finish()
 }
 
-fn collect_contract_functions(contract: &Contract, output: &mut Vec<(IrFunction, String)>) {
+fn collect_contract_functions(contract: &Contract, output: &mut Vec<FunctionBinding>) {
     for function in &contract.functions {
         let export_name = format!("{}::{}", contract.name, function.name);
-        output.push((function.clone(), export_name));
+        let runtime_export = abi::contract_export(&contract.name, &function.name);
+        let mut export_names = Vec::with_capacity(2);
+        export_names.push(export_name);
+        if !export_names.iter().any(|name| name == &runtime_export) {
+            export_names.push(runtime_export);
+        }
+        output.push(FunctionBinding {
+            function: function.clone(),
+            export_names,
+        });
     }
 }
 

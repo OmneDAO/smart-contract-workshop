@@ -69,3 +69,20 @@ fn clash(a: u128, a: bool):
         CompilerError::Semantics(SemanticError::DuplicateParameter { .. })
     ));
 }
+
+#[test]
+fn rejects_reserved_entry_name() {
+    let source = r#"
+fn axiom_entry_main() -> u128:
+    return 0
+
+fn main() -> u128:
+    return 0
+"#;
+
+    let err = compile_source(source).expect_err("expected reserved entry name error");
+    assert!(matches!(
+        err,
+        CompilerError::Semantics(SemanticError::ReservedFunctionName { .. })
+    ));
+}

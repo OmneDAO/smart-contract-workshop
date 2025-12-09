@@ -1,3 +1,4 @@
+use axiom_runtime::abi;
 use pysub_compiler::ir::{FunctionBody, ValueType};
 use pysub_compiler::{compile_to_ir, compile_to_wasm};
 
@@ -68,8 +69,9 @@ fn wasm_exports_all_functions() {
 
     assert!(exports.contains(&"ping".to_string()));
     assert!(exports.contains(&"Wallet::balance".to_string()));
-    assert!(exports.contains(&"axiom_entry_main".to_string()));
-    assert!(exports.contains(&"axiom_contract::Wallet::balance".to_string()));
+    assert!(exports.contains(&abi::LEGACY_ENTRY_EXPORT.to_string()));
+    assert!(exports.contains(&abi::ENTRY_EXPORT.to_string()));
+    assert!(exports.contains(&abi::contract_export("Wallet", "balance")));
 }
 
 #[test]
