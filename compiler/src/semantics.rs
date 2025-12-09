@@ -25,6 +25,16 @@ pub enum SemanticError {
 
     #[error("invalid map key type `{ty}` in {context}")]
     InvalidMapKeyType { ty: String, context: String },
+
+    #[error("missing required entry function `{0}`")]
+    MissingEntry(String),
+
+    #[error("invalid signature for entry `{function}`: expected `{expected}`, found `{found}`")]
+    InvalidEntrySignature {
+        function: String,
+        expected: String,
+        found: String,
+    },
 }
 
 pub struct SemanticAnalyzer;
@@ -41,6 +51,7 @@ impl SemanticAnalyzer {
         }
 
         let mut functions = HashSet::new();
+        let mut has_main = false;
         for function in &program.functions {
             let name = function.name.as_str().to_owned();
             if !functions.insert(name.clone()) {
@@ -50,6 +61,39 @@ impl SemanticAnalyzer {
                 });
             }
             Self::validate_function(function)?;
+
+            if function.name.as_str() == "main" {
+                has_main = true;
+                if !function.params.is_empty() {
+                    return Err(SemanticError::InvalidEntrySignature {
+                        function: "main".to_string(),
+                        expected: "fn main() -> u128".to_string(),
+                        found: format_function_signature(function),
+                    });
+                }
+
+                match &function.return_type {
+                    Some(Type::Primitive(PrimitiveType::U128)) => {}
+                    Some(other) => {
+                        return Err(SemanticError::InvalidEntrySignature {
+                            function: "main".to_string(),
+                            expected: "fn main() -> u128".to_string(),
+                            found: format!("fn main() -> {}", other),
+                        })
+                    }
+                    None => {
+                        return Err(SemanticError::InvalidEntrySignature {
+                            function: "main".to_string(),
+                            expected: "fn main() -> u128".to_string(),
+                            found: format_function_signature(function),
+                        })
+                    }
+                }
+            }
+        }
+
+        if !has_main {
+            return Err(SemanticError::MissingEntry("main".to_string()));
         }
 
         Ok(())
@@ -124,6 +168,27 @@ impl SemanticAnalyzer {
                 Self::validate_type(value, context)
             }
         }
+    }
+}
+
+fn format_function_signature(function: &Function) -> String {
+    let params = function
+        .params
+        .iter()
+        .map(|param| param.ty.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if let Some(ret) = &function.return_type {
+        if params.is_empty() {
+            format!("fn {}() -> {}", function.name, ret)
+        } else {
+            format!("fn {}({}) -> {}", function.name, params, ret)
+        }
+    } else if params.is_empty() {
+        format!("fn {}()", function.name)
+    } else {
+        format!("fn {}({})", function.name, params)
     }
 }
 

@@ -1,6 +1,6 @@
 //! Intermediate representation helpers for pysub compiler.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use thiserror::Error;
 
@@ -47,6 +47,33 @@ pub enum IrError {
 
     #[error("unsupported expression in function `{function}`")]
     UnsupportedExpression { function: String },
+
+    #[error("unknown host function `{function}` in `{caller}`")]
+    UnknownHostFunction { function: String, caller: String },
+
+    #[error(
+        "host function `{function}` in `{caller}` expects {expected} arguments but found {found}"
+    )]
+    HostFunctionArityMismatch {
+        function: String,
+        caller: String,
+        expected: usize,
+        found: usize,
+    },
+
+    #[error(
+        "host function `{function}` argument {position} in `{caller}` expects `{expected}`, found `{found}`"
+    )]
+    HostFunctionTypeMismatch {
+        function: String,
+        caller: String,
+        position: usize,
+        expected: ValueType,
+        found: ValueType,
+    },
+
+    #[error("host function `{function}` in `{caller}` does not return a value")]
+    HostFunctionReturnsVoid { function: String, caller: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -63,6 +90,19 @@ impl Module {
             .map(|contract| contract.functions.len())
             .sum();
         self.functions.len() + contract_fn_total
+    }
+
+    pub fn used_host_functions(&self) -> BTreeSet<HostFunction> {
+        let mut functions = BTreeSet::new();
+        for function in &self.functions {
+            collect_host_functions_from_function(function, &mut functions);
+        }
+        for contract in &self.contracts {
+            for function in &contract.functions {
+                collect_host_functions_from_function(function, &mut functions);
+            }
+        }
+        functions
     }
 }
 
@@ -113,6 +153,10 @@ pub enum Expr {
         right: Box<Expr>,
         ty: ValueType,
     },
+    HostCall {
+        function: HostFunction,
+        args: Vec<Expr>,
+    },
 }
 
 impl Expr {
@@ -122,6 +166,9 @@ impl Expr {
             Expr::ConstI32(_) => ValueType::I32,
             Expr::ConstI64(_) => ValueType::I64,
             Expr::Binary { ty, .. } => *ty,
+            Expr::HostCall { function, .. } => function
+                .return_type()
+                .expect("host call used in expression must return a value"),
         }
     }
 }
@@ -139,6 +186,75 @@ pub enum BinaryOp {
 pub enum ValueType {
     I32,
     I64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum HostFunction {
+    SystemGetGasRemaining,
+    SystemGetExecutionTime,
+    MemoryDeterministicMalloc,
+    MemoryDeterministicRealloc,
+    MemoryUsage,
+}
+
+impl HostFunction {
+    const NO_PARAMS: &'static [ValueType] = &[];
+    const I32_PARAM: &'static [ValueType] = &[ValueType::I32];
+    const I32_I32_PARAMS: &'static [ValueType] = &[ValueType::I32, ValueType::I32];
+
+    pub fn from_identifier(name: &str) -> Option<Self> {
+        match name {
+            "get_gas_remaining" => Some(Self::SystemGetGasRemaining),
+            "get_execution_time" => Some(Self::SystemGetExecutionTime),
+            "deterministic_malloc" => Some(Self::MemoryDeterministicMalloc),
+            "deterministic_realloc" => Some(Self::MemoryDeterministicRealloc),
+            "memory_usage" => Some(Self::MemoryUsage),
+            _ => None,
+        }
+    }
+
+    pub fn module(&self) -> &'static str {
+        match self {
+            HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
+                "axiom_system"
+            }
+            HostFunction::MemoryDeterministicMalloc
+            | HostFunction::MemoryDeterministicRealloc
+            | HostFunction::MemoryUsage => "axiom_memory",
+        }
+    }
+
+    pub fn field(&self) -> &'static str {
+        match self {
+            HostFunction::SystemGetGasRemaining => "get_gas_remaining",
+            HostFunction::SystemGetExecutionTime => "get_execution_time",
+            HostFunction::MemoryDeterministicMalloc => "deterministic_malloc",
+            HostFunction::MemoryDeterministicRealloc => "deterministic_realloc",
+            HostFunction::MemoryUsage => "memory_usage",
+        }
+    }
+
+    pub fn params(&self) -> &'static [ValueType] {
+        match self {
+            HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
+                Self::NO_PARAMS
+            }
+            HostFunction::MemoryDeterministicMalloc => Self::I32_PARAM,
+            HostFunction::MemoryDeterministicRealloc => Self::I32_I32_PARAMS,
+            HostFunction::MemoryUsage => Self::NO_PARAMS,
+        }
+    }
+
+    pub fn return_type(&self) -> Option<ValueType> {
+        match self {
+            HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
+                Some(ValueType::I64)
+            }
+            HostFunction::MemoryDeterministicMalloc => Some(ValueType::I32),
+            HostFunction::MemoryDeterministicRealloc => Some(ValueType::I32),
+            HostFunction::MemoryUsage => Some(ValueType::I64),
+        }
+    }
 }
 
 impl std::fmt::Display for ValueType {
@@ -322,6 +438,67 @@ fn lower_expression(
                 ty: left_ty,
             })
         }
+        Expression::Call { callee, args } => {
+            if let Expression::Identifier(ident) = callee.as_ref() {
+                if let Some(host) = HostFunction::from_identifier(ident.as_str()) {
+                    let expected = host.params();
+                    if args.len() != expected.len() {
+                        return Err(IrError::HostFunctionArityMismatch {
+                            function: ident.as_str().to_owned(),
+                            caller: function_name.to_owned(),
+                            expected: expected.len(),
+                            found: args.len(),
+                        });
+                    }
+
+                    let mut lowered_args = Vec::with_capacity(args.len());
+                    for (index, (arg, expected_ty)) in args.iter().zip(expected.iter()).enumerate()
+                    {
+                        let lowered = lower_expression(arg, params, function_name)?;
+                        let actual_ty = lowered.value_type();
+
+                        let lowered = if actual_ty == *expected_ty {
+                            lowered
+                        } else if let Some(coerced) =
+                            try_coerce_host_argument(lowered, *expected_ty)
+                        {
+                            coerced
+                        } else {
+                            return Err(IrError::HostFunctionTypeMismatch {
+                                function: ident.as_str().to_owned(),
+                                caller: function_name.to_owned(),
+                                position: index + 1,
+                                expected: *expected_ty,
+                                found: actual_ty,
+                            });
+                        };
+
+                        lowered_args.push(lowered);
+                    }
+
+                    if host.return_type().is_none() {
+                        return Err(IrError::HostFunctionReturnsVoid {
+                            function: ident.as_str().to_owned(),
+                            caller: function_name.to_owned(),
+                        });
+                    }
+
+                    return Ok(Expr::HostCall {
+                        function: host,
+                        args: lowered_args,
+                    });
+                }
+
+                return Err(IrError::UnknownHostFunction {
+                    function: ident.as_str().to_owned(),
+                    caller: function_name.to_owned(),
+                });
+            }
+
+            Err(IrError::UnsupportedExpression {
+                function: function_name.to_owned(),
+            })
+        }
         _ => Err(IrError::UnsupportedExpression {
             function: function_name.to_owned(),
         }),
@@ -365,6 +542,47 @@ fn convert_params(params: &[crate::ast::Param]) -> Vec<Param> {
             ty: convert_type(&param.ty),
         })
         .collect()
+}
+
+fn collect_host_functions_from_function(
+    function: &Function,
+    collection: &mut BTreeSet<HostFunction>,
+) {
+    let value = match &function.body {
+        FunctionBody::Return { value } => value,
+    };
+
+    if let Some(expr) = value {
+        collect_host_functions_from_expr(expr, collection);
+    }
+}
+
+fn collect_host_functions_from_expr(expr: &Expr, collection: &mut BTreeSet<HostFunction>) {
+    match expr {
+        Expr::Param { .. } | Expr::ConstI32(_) | Expr::ConstI64(_) => {}
+        Expr::Binary { left, right, .. } => {
+            collect_host_functions_from_expr(left, collection);
+            collect_host_functions_from_expr(right, collection);
+        }
+        Expr::HostCall { function, args } => {
+            collection.insert(*function);
+            for arg in args {
+                collect_host_functions_from_expr(arg, collection);
+            }
+        }
+    }
+}
+
+fn try_coerce_host_argument(expr: Expr, expected: ValueType) -> Option<Expr> {
+    match (expected, expr) {
+        (ValueType::I32, Expr::ConstI64(value))
+            if value >= i64::from(i32::MIN) && value <= i64::from(i32::MAX) =>
+        {
+            Some(Expr::ConstI32(value as i32))
+        }
+        (ValueType::I64, Expr::ConstI32(value)) => Some(Expr::ConstI64(i64::from(value))),
+        (_, _expr) => None,
+    }
 }
 
 fn convert_type(ty: &Type) -> ValueType {
