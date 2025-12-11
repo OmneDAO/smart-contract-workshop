@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod codegen_wasm;
 pub mod ir;
+pub mod metadata;
 pub mod parser;
 pub mod semantics;
 
@@ -28,6 +29,9 @@ pub enum CompilerError {
         source: std::io::Error,
         path: PathBuf,
     },
+
+    #[error("serialization error: {0}")]
+    Serialization(String),
 }
 
 /// Parse, build the AST, and run semantic validation for the provided source code.
@@ -38,6 +42,12 @@ pub fn compile_source(source: &str) -> Result<ast::Program, CompilerError> {
     Ok(program)
 }
 
+#[derive(Debug, Clone)]
+pub struct CompilationArtifacts {
+    pub wasm: Vec<u8>,
+    pub metadata: metadata::CompilationMetadata,
+}
+
 /// Compile a pysub source file. Returns the AST when successful.
 pub fn compile_file(path: impl AsRef<Path>) -> Result<ast::Program, CompilerError> {
     let path_ref = path.as_ref();
@@ -46,6 +56,18 @@ pub fn compile_file(path: impl AsRef<Path>) -> Result<ast::Program, CompilerErro
         path: path_ref.to_path_buf(),
     })?;
     compile_source(&source)
+}
+
+/// Compile a pysub source file and produce wasm bytes plus metadata.
+pub fn compile_file_with_artifacts(
+    path: impl AsRef<Path>,
+) -> Result<CompilationArtifacts, CompilerError> {
+    let path_ref = path.as_ref();
+    let source = std::fs::read_to_string(path_ref).map_err(|source| CompilerError::Io {
+        source,
+        path: path_ref.to_path_buf(),
+    })?;
+    compile_source_with_metadata(&source, Some(path_ref))
 }
 
 /// Compile pysub source to the intermediate representation.
@@ -61,6 +83,16 @@ pub fn compile_to_ir(source: &str) -> Result<ir::Module, CompilerError> {
 /// Code generation is not yet implemented; this function exists to wire future
 /// stages into the existing compile helpers.
 pub fn compile_to_wasm(source: &str) -> Result<Vec<u8>, CompilerError> {
+    Ok(compile_source_with_metadata(source, None)?.wasm)
+}
+
+/// Compile pysub source to wasm bytes and metadata in a single pass.
+pub fn compile_source_with_metadata(
+    source: &str,
+    source_path: Option<&Path>,
+) -> Result<CompilationArtifacts, CompilerError> {
     let module = compile_to_ir(source)?;
-    Ok(codegen_wasm::emit_wasm(&module))
+    let wasm = codegen_wasm::emit_wasm(&module);
+    let metadata = metadata::CompilationMetadata::from_ir(&module, source_path, &wasm);
+    Ok(CompilationArtifacts { wasm, metadata })
 }
