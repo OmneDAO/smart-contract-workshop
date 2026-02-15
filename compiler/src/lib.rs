@@ -1,7 +1,10 @@
 pub mod ast;
 pub mod codegen_wasm;
+pub mod dsl;
 pub mod ir;
+pub mod manifest;
 pub mod metadata;
+pub mod serialize;
 pub mod parser;
 pub mod semantics;
 
@@ -32,6 +35,9 @@ pub enum CompilerError {
 
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    #[error("manifest error: {0}")]
+    Manifest(String),
 }
 
 /// Parse, build the AST, and run semantic validation for the provided source code.
@@ -68,6 +74,24 @@ pub fn compile_file_with_artifacts(
         path: path_ref.to_path_buf(),
     })?;
     compile_source_with_metadata(&source, Some(path_ref))
+}
+
+pub fn manifest_summary(path: impl AsRef<Path>) -> Result<manifest::ManifestSummary, CompilerError> {
+    let path_ref = path.as_ref();
+    let manifest =
+        manifest::load_manifest(path_ref).map_err(|err| CompilerError::Manifest(err.to_string()))?;
+    Ok(manifest::summarize_manifest(path_ref, &manifest))
+}
+
+pub fn compile_manifest_with_artifacts(
+    path: impl AsRef<Path>,
+) -> Result<CompilationArtifacts, CompilerError> {
+    let path_ref = path.as_ref();
+    let module = manifest::compile_manifest_to_ir(path_ref)
+        .map_err(|err| CompilerError::Manifest(err.to_string()))?;
+    let wasm = codegen_wasm::emit_wasm(&module);
+    let metadata = metadata::CompilationMetadata::from_ir(&module, Some(path_ref), &wasm);
+    Ok(CompilationArtifacts { wasm, metadata })
 }
 
 /// Compile pysub source to the intermediate representation.
