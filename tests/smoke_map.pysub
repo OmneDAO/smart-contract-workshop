@@ -1,0 +1,14 @@
+module: smoke
+
+state:
+    counters: map<bytes, uint128>
+
+functions:
+fn inc(key: bytes, delta: uint128) -> uint128:
+    let current: uint128 = counters[key]
+    let sum: uint128 = current + delta
+    counters[key] = sum
+    return sum
+
+fn get(key: bytes) -> uint128:
+    return counters[key]

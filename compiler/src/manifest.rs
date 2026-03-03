@@ -418,6 +418,68 @@ fn lower_stmt(
             output.push(IrStmt::Let { local: index, value: expr });
         }
         DslStmt::Assign { target, value } => {
+            if let DslExpr::Index { target, index } = target {
+                let map_name = match target.as_ref() {
+                    DslExpr::Identifier(name) => name,
+                    other => {
+                        return Err(ManifestCompileError::UnsupportedStatement {
+                            module: module.to_string(),
+                            statement: format!("assign to non-identifier map {other:?}"),
+                        })
+                    }
+                };
+
+                let dsl_type = lookup_dsl_type(map_name, param_dsl_types, local_dsl_types, state_fields)
+                    .ok_or_else(|| ManifestCompileError::UnknownIdentifier {
+                        module: module.to_string(),
+                        identifier: map_name.clone(),
+                    })?;
+
+                if !matches!(dsl_type, DslType::Map { .. }) {
+                    return Err(ManifestCompileError::UnsupportedStatement {
+                        module: module.to_string(),
+                        statement: format!("index assignment on non-map {dsl_type:?}"),
+                    });
+                }
+
+                let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
+
+                let (mut key_stmts, key_ptr, key_len) = lower_value_buffer(
+                    module,
+                    index,
+                    params,
+                    locals,
+                    param_dsl_types,
+                    local_dsl_types,
+                    local_defs,
+                    params.len(),
+                    data_allocator,
+                    state_fields,
+                    structs,
+                )?;
+                let (value_stmts, value_ptr, value_len) = lower_value_buffer(
+                    module,
+                    value,
+                    params,
+                    locals,
+                    param_dsl_types,
+                    local_dsl_types,
+                    local_defs,
+                    params.len(),
+                    data_allocator,
+                    state_fields,
+                    structs,
+                )?;
+                key_stmts.extend(value_stmts);
+
+                output.extend(key_stmts);
+                output.push(IrStmt::Expr(IrExpr::HostCall {
+                    function: crate::ir::HostFunction::StdMapPut,
+                    args: vec![map_ptr, map_len, key_ptr, key_len, value_ptr, value_len],
+                }));
+                return Ok(());
+            }
+
             let target_name = match target {
                 DslExpr::Identifier(name) => name,
                 other => {
@@ -875,6 +937,58 @@ fn lower_expr(
             })?;
             return lower_struct_field_expr(module, base_expr, struct_def, attribute);
         }
+        DslExpr::Index { target, index } => {
+            let map_name = match target.as_ref() {
+                DslExpr::Identifier(name) => name,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("index target {target:?}"),
+                    })
+                }
+            };
+
+            let dsl_type = lookup_dsl_type(map_name, param_dsl_types, local_dsl_types, state_fields)
+                .ok_or_else(|| ManifestCompileError::UnknownIdentifier {
+                    module: module.to_string(),
+                    identifier: map_name.clone(),
+                })?;
+
+            let value_type = match dsl_type {
+                DslType::Map { key: _, value } => *value,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("index on non-map {dsl_type:?}"),
+                    })
+                }
+            };
+
+            let (stmts, value_expr) = lower_map_get_expr(
+                module,
+                map_name,
+                index,
+                &value_type,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                &mut Vec::new(),
+                params.len(),
+                data_allocator,
+                state_fields,
+                structs,
+            )?;
+
+            if !stmts.is_empty() {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: "map index produced side effects".to_string(),
+                });
+            }
+
+            return Ok(value_expr);
+        }
         DslExpr::Binary { left, op, right } => {
             let left = lower_expr(
                 module,
@@ -1043,10 +1157,6 @@ fn lower_expr(
                 expression: format!("call {:?}", callee),
             })
         }
-        DslExpr::Index { .. } => Err(ManifestCompileError::UnsupportedExpression {
-            module: module.to_string(),
-            expression: format!("{:?}", expr),
-        }),
     }
 }
 
@@ -2746,6 +2856,183 @@ fn lower_attribute_call(
         state_fields,
     )?;
 
+    if let DslType::Map { key: _, value } = base_type {
+        let map_name = match target {
+            DslExpr::Identifier(name) => name,
+            _ => {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: format!("map attribute target {target:?}"),
+                })
+            }
+        };
+
+        let positional = call_args_to_positional(module, args)?;
+        return match attribute {
+            "get" => {
+                if positional.is_empty() || positional.len() > 2 {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "map.get expects key and optional default".to_string(),
+                    });
+                }
+
+                let (key_stmts, key_ptr, key_len) = lower_value_buffer(
+                    module,
+                    &positional[0],
+                    params,
+                    locals,
+                    param_dsl_types,
+                    local_dsl_types,
+                    &mut Vec::new(),
+                    params.len(),
+                    data_allocator,
+                    state_fields,
+                    structs,
+                )?;
+                if !key_stmts.is_empty() {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "map.get key produced side effects".to_string(),
+                    });
+                }
+
+                let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
+                let out_len_ptr = data_allocator.allocate(vec![0, 0, 0, 0]);
+
+                let call = IrExpr::HostCall {
+                    function: crate::ir::HostFunction::StdMapGet,
+                    args: vec![
+                        map_ptr,
+                        map_len,
+                        key_ptr,
+                        key_len,
+                        IrExpr::ConstI32(out_len_ptr as i32),
+                    ],
+                };
+
+                let present_cond = IrExpr::Binary {
+                    op: IrBinaryOp::NotEqual,
+                    left: Box::new(call.clone()),
+                    right: Box::new(IrExpr::ConstI32(0)),
+                    ty: ValueType::I32,
+                };
+
+                let found_value = map_value_from_ptr(module, &value, call)?;
+                let default_expr = positional.get(1);
+                let default_value = if let Some(default_expr) = default_expr {
+                    let lowered = lower_expr(
+                        module,
+                        "map_default",
+                        default_expr,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                    )?;
+                    if lowered.value_type() != found_value.value_type() {
+                        return Err(ManifestCompileError::TypeMismatch {
+                            module: module.to_string(),
+                            expected: found_value.value_type(),
+                            found: lowered.value_type(),
+                        });
+                    }
+                    lowered
+                } else {
+                    match value.as_ref() {
+                        DslType::Uint { .. } | DslType::Int { .. } => IrExpr::ConstI64(0),
+                        DslType::Bool => IrExpr::ConstI32(0),
+                        _ if is_pointer_type(&value) => IrExpr::ConstI32(0),
+                        _ => {
+                            return Err(ManifestCompileError::UnsupportedType {
+                                module: module.to_string(),
+                                ty: value.to_string(),
+                            })
+                        }
+                    }
+                };
+
+                Ok(IrExpr::Select {
+                    condition: Box::new(present_cond),
+                    if_true: Box::new(found_value),
+                    if_false: Box::new(default_value),
+                    ty: map_type(module, &value)?,
+                })
+            }
+            "contains" => {
+                if positional.len() != 1 {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "contains expects key".to_string(),
+                    });
+                }
+                let (key_stmts, key_ptr, key_len) = lower_value_buffer(
+                    module,
+                    &positional[0],
+                    params,
+                    locals,
+                    param_dsl_types,
+                    local_dsl_types,
+                    &mut Vec::new(),
+                    params.len(),
+                    data_allocator,
+                    state_fields,
+                    structs,
+                )?;
+                if !key_stmts.is_empty() {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "contains key produced side effects".to_string(),
+                    });
+                }
+                let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
+                Ok(IrExpr::HostCall {
+                    function: crate::ir::HostFunction::StdMapContains,
+                    args: vec![map_ptr, map_len, key_ptr, key_len],
+                })
+            }
+            "remove" => {
+                if positional.len() != 1 {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "remove expects key".to_string(),
+                    });
+                }
+                let (key_stmts, key_ptr, key_len) = lower_value_buffer(
+                    module,
+                    &positional[0],
+                    params,
+                    locals,
+                    param_dsl_types,
+                    local_dsl_types,
+                    &mut Vec::new(),
+                    params.len(),
+                    data_allocator,
+                    state_fields,
+                    structs,
+                )?;
+                if !key_stmts.is_empty() {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "remove key produced side effects".to_string(),
+                    });
+                }
+                let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
+                Ok(IrExpr::HostCall {
+                    function: crate::ir::HostFunction::StdMapRemove,
+                    args: vec![map_ptr, map_len, key_ptr, key_len],
+                })
+            }
+            _ => Err(ManifestCompileError::UnsupportedExpression {
+                module: module.to_string(),
+                expression: format!("unsupported map attribute call {attribute}"),
+            }),
+        };
+    }
+
     let DslType::Optional(inner) = base_type else {
         return Err(ManifestCompileError::UnsupportedExpression {
             module: module.to_string(),
@@ -2856,6 +3143,31 @@ fn optional_unwrap_expr(
     }
 }
 
+fn map_name_buffer(map_name: &str, data_allocator: &mut DataAllocator) -> (IrExpr, IrExpr) {
+    let bytes = map_name.as_bytes().to_vec();
+    let len = bytes.len() as i32;
+    let ptr = data_allocator.allocate(bytes);
+    (IrExpr::ConstI32(ptr as i32), IrExpr::ConstI32(len))
+}
+
+fn map_value_from_ptr(
+    module: &str,
+    value_type: &DslType,
+    ptr_expr: IrExpr,
+) -> Result<IrExpr, ManifestCompileError> {
+    match value_type {
+        DslType::Uint { .. } | DslType::Int { .. } => Ok(load_i64(ptr_expr)),
+        DslType::Bool => Ok(IrExpr::LoadI8 {
+            address: Box::new(ptr_expr),
+        }),
+        _ if is_pointer_type(value_type) => Ok(ptr_expr),
+        _ => Err(ManifestCompileError::UnsupportedType {
+            module: module.to_string(),
+            ty: value_type.to_string(),
+        }),
+    }
+}
+
 fn lower_state_read(
     module: &str,
     args: &[DslCallArg],
@@ -2880,6 +3192,85 @@ fn lower_state_read(
         out_len_ptr,
         ty: ValueType::I64,
     })
+}
+
+fn lower_map_get_expr(
+    module: &str,
+    map_name: &str,
+    key_expr: &DslExpr,
+    value_type: &DslType,
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let (key_stmts, key_ptr, key_len) = lower_value_buffer(
+        module,
+        key_expr,
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        structs,
+    )?;
+    if !key_stmts.is_empty() {
+        return Err(ManifestCompileError::UnsupportedExpression {
+            module: module.to_string(),
+            expression: format!("map index requires simple key {key_expr:?}"),
+        });
+    }
+
+    let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
+    let out_len_ptr = data_allocator.allocate(vec![0, 0, 0, 0]);
+
+    let call = IrExpr::HostCall {
+        function: crate::ir::HostFunction::StdMapGet,
+        args: vec![
+            map_ptr,
+            map_len,
+            key_ptr,
+            key_len,
+            IrExpr::ConstI32(out_len_ptr as i32),
+        ],
+    };
+
+    let present = IrExpr::Binary {
+        op: IrBinaryOp::NotEqual,
+        left: Box::new(call.clone()),
+        right: Box::new(IrExpr::ConstI32(0)),
+        ty: ValueType::I32,
+    };
+
+    let found_value = map_value_from_ptr(module, value_type, call.clone())?;
+    let default_value = match value_type {
+        DslType::Uint { .. } | DslType::Int { .. } => IrExpr::ConstI64(0),
+        DslType::Bool => IrExpr::ConstI32(0),
+        _ if is_pointer_type(value_type) => IrExpr::ConstI32(0),
+        _ => {
+            return Err(ManifestCompileError::UnsupportedType {
+                module: module.to_string(),
+                ty: value_type.to_string(),
+            })
+        }
+    };
+
+    let value = IrExpr::Select {
+        condition: Box::new(present),
+        if_true: Box::new(found_value),
+        if_false: Box::new(default_value),
+        ty: map_type(module, value_type)?,
+    };
+
+    Ok((Vec::new(), value))
 }
 
 fn lower_state_write_stmt(
@@ -3263,6 +3654,7 @@ fn map_type(_module: &str, ty: &DslType) -> Result<ValueType, ManifestCompileErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use crate::dsl::{DslExpr, DslFunction, DslModule, DslParam, DslStateField, DslStmt, DslType};
     use crate::ir::{Expr as IrExpr, HostFunction, Stmt as IrStmt, StoreWidth, ValueType};
 
@@ -3372,6 +3764,30 @@ mod tests {
         assert!(segments.iter().any(|segment| segment.bytes == key_bytes));
         assert!(segments.iter().any(|segment| segment.bytes == vec![0; 8]));
         assert_eq!(store_width, StoreWidth::I64);
+    }
+
+    #[test]
+    fn compiles_smoke_map_manifest() {
+        let module = compile_manifest_to_ir(Path::new("../tests/smoke_map.yml"))
+            .expect("compile smoke_map manifest");
+        assert_eq!(module.contracts.len(), 1);
+        let contract = &module.contracts[0];
+        assert_eq!(contract.functions.len(), 2);
+        let hosts = module.used_host_functions();
+        assert!(hosts.contains(&HostFunction::StdMapGet));
+        assert!(hosts.contains(&HostFunction::StdMapPut));
+    }
+
+    #[test]
+    fn compiles_token_simple_manifest() {
+        let module = compile_manifest_to_ir(Path::new("../tests/token_simple.yml"))
+            .expect("compile token_simple manifest");
+        assert_eq!(module.contracts.len(), 1);
+        let contract = &module.contracts[0];
+        assert_eq!(contract.functions.len(), 3);
+        let hosts = module.used_host_functions();
+        assert!(hosts.contains(&HostFunction::StdMapGet));
+        assert!(hosts.contains(&HostFunction::StdMapPut));
     }
 }
 

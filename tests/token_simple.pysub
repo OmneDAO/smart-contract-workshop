@@ -1,0 +1,24 @@
+module: token
+
+state:
+  total_supply: uint128
+  balances: map<address, uint128>
+
+functions:
+fn init(owner: address, amount: uint128):
+    total_supply = amount
+    balances[owner] = amount
+
+fn balance_of(target: address) -> uint128:
+    return balances[target]
+
+fn transfer(from: address, to: address, amount: uint128) -> bool:
+    let from_balance: uint128 = balances[from]
+    if from_balance < amount:
+        return false
+    let to_balance: uint128 = balances[to]
+    let new_from: uint128 = from_balance - amount
+    let new_to: uint128 = to_balance + amount
+    balances[from] = new_from
+    balances[to] = new_to
+    return true

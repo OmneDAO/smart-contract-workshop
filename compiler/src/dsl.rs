@@ -417,7 +417,13 @@ fn parse_function(
         reason: "missing ')'".to_string(),
     })?;
 
-    let name = head[..open_paren].trim();
+    let mut name = head[..open_paren].trim();
+    if let Some(stripped) = name.strip_prefix("pub ") {
+        name = stripped.trim_start();
+    }
+    if let Some(stripped) = name.strip_prefix("fn ") {
+        name = stripped.trim_start();
+    }
     if name.is_empty() {
         return Err(DslParseError::InvalidSignature {
             signature: signature.to_string(),
@@ -748,6 +754,52 @@ impl BlockParser {
                 binding: binding.trim().to_string(),
                 iterable: iterable_expr,
                 body,
+            });
+        }
+
+        if let Some(rest) = line.strip_prefix("let ") {
+            let rest = rest.trim();
+            let rest = self.collect_continuation(rest.to_string())?;
+            let (left, right) = rest.split_once('=').ok_or_else(|| {
+                DslParseError::Statement(format!(
+                    "line {}: let statement missing '='",
+                    line_no + 1
+                ))
+            })?;
+            let (name, ty) = if let Some((raw_name, raw_ty)) = left.split_once(':') {
+                let name = raw_name.trim();
+                let ty = raw_ty.trim();
+                if name.is_empty() || ty.is_empty() {
+                    return Err(DslParseError::Statement(format!(
+                        "line {}: invalid let binding",
+                        line_no + 1
+                    )));
+                }
+                (name, Some(parse_type(ty)?))
+            } else {
+                let name = left.trim();
+                if name.is_empty() {
+                    return Err(DslParseError::Statement(format!(
+                        "line {}: invalid let binding",
+                        line_no + 1
+                    )));
+                }
+                (name, None)
+            };
+
+            let value = parse_expr(right.trim()).map_err(|err| {
+                DslParseError::Expression(format!(
+                    "line {}: {} in `{}`",
+                    line_no + 1,
+                    err,
+                    right.trim()
+                ))
+            })?;
+
+            return Ok(DslStmt::Let {
+                name: name.to_string(),
+                ty,
+                value,
             });
         }
 

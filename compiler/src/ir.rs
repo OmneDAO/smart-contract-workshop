@@ -280,7 +280,13 @@ pub enum HostFunction {
     MemoryUsage,
     StdStateRead,
     StdStateWrite,
+    StdGetCaller,
+    StdEmitEvent,
     StdCryptoEd25519VerifyHex,
+    StdMapGet,
+    StdMapPut,
+    StdMapRemove,
+    StdMapContains,
 }
 
 impl HostFunction {
@@ -302,7 +308,13 @@ impl HostFunction {
             "memory_usage" => Some(Self::MemoryUsage),
             "state_read" => Some(Self::StdStateRead),
             "state_write" => Some(Self::StdStateWrite),
+            "get_caller" => Some(Self::StdGetCaller),
+            "emit_event" => Some(Self::StdEmitEvent),
             "ed25519_verify_hex" => Some(Self::StdCryptoEd25519VerifyHex),
+            "map_get" => Some(Self::StdMapGet),
+            "map_put" => Some(Self::StdMapPut),
+            "map_remove" => Some(Self::StdMapRemove),
+            "map_contains" => Some(Self::StdMapContains),
             _ => None,
         }
     }
@@ -315,7 +327,14 @@ impl HostFunction {
             HostFunction::MemoryDeterministicMalloc
             | HostFunction::MemoryDeterministicRealloc
             | HostFunction::MemoryUsage => "axiom_memory",
-            HostFunction::StdStateRead | HostFunction::StdStateWrite => "std_runtime",
+            HostFunction::StdStateRead
+            | HostFunction::StdStateWrite
+            | HostFunction::StdGetCaller
+            | HostFunction::StdEmitEvent
+            | HostFunction::StdMapGet
+            | HostFunction::StdMapPut
+            | HostFunction::StdMapRemove
+            | HostFunction::StdMapContains => "std_runtime",
             HostFunction::StdCryptoEd25519VerifyHex => "std_crypto",
         }
     }
@@ -330,6 +349,12 @@ impl HostFunction {
             HostFunction::MemoryUsage => "memory_usage",
             HostFunction::StdStateRead => "state_read",
             HostFunction::StdStateWrite => "state_write",
+            HostFunction::StdGetCaller => "get_caller",
+            HostFunction::StdEmitEvent => "emit_event",
+            HostFunction::StdMapGet => "map_get",
+            HostFunction::StdMapPut => "map_put",
+            HostFunction::StdMapRemove => "map_remove",
+            HostFunction::StdMapContains => "map_contains",
             HostFunction::StdCryptoEd25519VerifyHex => "ed25519_verify_hex",
         }
     }
@@ -344,6 +369,12 @@ impl HostFunction {
             HostFunction::MemoryUsage => Self::NO_PARAMS,
             HostFunction::StdStateRead => Self::I32_I32_I32_PARAMS,
             HostFunction::StdStateWrite => Self::I32_I32_I32_I32_PARAMS,
+            HostFunction::StdGetCaller => Self::NO_PARAMS,
+            HostFunction::StdEmitEvent => Self::I32_I32_PARAMS,
+            HostFunction::StdMapGet => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapPut => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapRemove => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapContains => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdCryptoEd25519VerifyHex => Self::I32_I32_I32_PARAMS,
         }
     }
@@ -359,6 +390,12 @@ impl HostFunction {
             HostFunction::MemoryUsage => Some(ValueType::I64),
             HostFunction::StdStateRead => Some(ValueType::I32),
             HostFunction::StdStateWrite => None,
+            HostFunction::StdGetCaller => Some(ValueType::I32),
+            HostFunction::StdEmitEvent => Some(ValueType::I32),
+            HostFunction::StdMapGet => Some(ValueType::I32),
+            HostFunction::StdMapPut => None,
+            HostFunction::StdMapRemove => None,
+            HostFunction::StdMapContains => Some(ValueType::I32),
             HostFunction::StdCryptoEd25519VerifyHex => Some(ValueType::I32),
         }
     }
