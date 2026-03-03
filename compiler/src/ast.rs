@@ -689,18 +689,14 @@ fn parse_assign_target(pair: Pair<Rule>) -> Result<Expression, AstError> {
                     attribute: ident,
                 };
             }
-            Rule::expr => {
+            // Allow any expression rule here because assign_suffix is silent, so the
+            // inner pair may arrive as `expr` or a lowered expression rule (e.g. logical_or).
+            _ => {
                 let index = parse_expression(child)?;
                 expr = Expression::Index {
                     target: Box::new(expr),
                     index: Box::new(index),
                 };
-            }
-            other => {
-                return Err(AstError::UnexpectedRule {
-                    context: "assign suffix",
-                    found: other,
-                });
             }
         }
     }

@@ -1,0 +1,10 @@
+contract: smoke
+version: 0.0.1
+modules:
+  - name: smoke
+    path: smoke_map.pysub
+entrypoints:
+  - module: smoke
+    name: inc
+  - module: smoke
+    name: get

@@ -3,7 +3,7 @@ use std::{env, fs, path::PathBuf, process};
 use chrono::Utc;
 use ed25519_dalek::{Signer, SigningKey};
 use pysub_compiler::{
-    compile_file_with_artifacts,
+    compile_file_with_artifacts, compile_manifest_with_artifacts,
     metadata::{canonical_metadata_digest, CompilationMetadata},
 };
 use rand::rngs::OsRng;
@@ -18,8 +18,17 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let options = parse_args()?;
-    let artifacts = compile_file_with_artifacts(&options.source)
-        .map_err(|err| err.to_string())?;
+    let artifacts = if let Some(manifest_path) = options.manifest.as_deref() {
+        compile_manifest_with_artifacts(manifest_path).map_err(|err| err.to_string())?
+    } else {
+        let contents = fs::read_to_string(&options.source)
+            .map_err(|err| format!("failed to read source {}: {err}", options.source))?;
+        if pysub_compiler::manifest::looks_like_manifest(&contents) {
+            compile_manifest_with_artifacts(&options.source).map_err(|err| err.to_string())?
+        } else {
+            compile_file_with_artifacts(&options.source).map_err(|err| err.to_string())?
+        }
+    };
     let pysub_compiler::CompilationArtifacts { wasm, metadata } = artifacts;
 
     if let Some(wasm_path) = options.emit_wasm.as_deref() {
@@ -39,6 +48,7 @@ fn run() -> Result<(), String> {
 #[derive(Debug, Default)]
 struct CliOptions {
     source: String,
+    manifest: Option<String>,
     emit_metadata: Option<String>,
     emit_wasm: Option<String>,
     signing_key: Option<String>,
@@ -56,6 +66,12 @@ fn parse_args() -> Result<CliOptions, String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--manifest" => {
+                let Some(path) = args.next() else {
+                    return Err("--manifest requires a path".to_string());
+                };
+                options.manifest = Some(path);
+            }
             "--emit-metadata" => {
                 let Some(path) = args.next() else {
                     return Err("--emit-metadata requires a path".to_string());
@@ -95,7 +111,9 @@ fn parse_args() -> Result<CliOptions, String> {
     }
 
     if options.source.is_empty() {
-        return Err("source file is required".to_string());
+        if options.manifest.is_none() {
+            return Err("source file is required".to_string());
+        }
     }
 
     if options.signing_key.is_some() && options.no_sign {
@@ -221,6 +239,7 @@ struct MetadataSignature {
 fn print_usage() {
     eprintln!("Usage: pysub-compiler [OPTIONS] <source-file>");
     eprintln!("\nOptions:");
+    eprintln!("  --manifest <path>        Compile a YAML manifest instead of a pysub source file");
     eprintln!("  --emit-metadata <path>   Write compilation metadata JSON to the given path");
     eprintln!("  --emit-wasm <path>       Write emitted WASM bytes to the given path");
     eprintln!("  --signing-key <path>     Sign metadata with the Ed25519 key at the given path");

@@ -10,6 +10,7 @@ The runtime exposes a deterministic subset of host functions. Modules may import
 |--------|-----------|-------|
 | `axiom_system` | `get_gas_remaining() -> i64`, `get_execution_time() -> i64`, `abort()` | Deterministic system signals. `abort` traps execution. Currently only the gas and execution time helpers are wired through the compiler. |
 | `axiom_memory` | `deterministic_malloc(u32) -> u32`, `deterministic_free(u32)`, `deterministic_realloc(u32, u32) -> u32`, `memory_usage() -> u64` | Deterministic allocator bindings. The compiler currently wires `deterministic_malloc`, `deterministic_realloc`, and `memory_usage`; `deterministic_free` will land alongside statement support. |
+| `std_runtime` | `state_read(ptr, len, out_len_ptr) -> i32`, `state_write(key_ptr, key_len, val_ptr, val_len) -> i32`, `get_caller() -> i32`, `emit_event(ptr, len) -> i32`, `map_get`, `map_put`, `map_remove`, `map_contains` | State and event helpers. `get_caller` returns a length-prefixed address and requires the engine to set `ExecutionConfig::caller_address`. `emit_event` enqueues opaque payloads returned in `ExecutionResult.events`. |
 | `axiom_float` | Deterministic `f64_*` helpers (`f64_add`, `f64_sub`, `f64_mul`, `f64_div`, `f64_sqrt`, `f64_abs`, `f64_neg`, `f64_min`, `f64_max`, `f64_floor`, `f64_ceil`, `f64_round`) | All float operations round identically across validators. |
 | `env` | `abort()` | Compatibility alias for engines that emit `env::abort`. |
 

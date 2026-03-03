@@ -80,6 +80,7 @@ pub enum IrError {
 pub struct Module {
     pub contracts: Vec<Contract>,
     pub functions: Vec<Function>,
+    pub data_segments: Vec<DataSegment>,
 }
 
 impl Module {
@@ -135,8 +136,38 @@ pub struct Param {
 }
 
 #[derive(Debug, Clone)]
+pub struct DataSegment {
+    pub offset: u32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
 pub enum FunctionBody {
     Return { value: Option<Expr> },
+    Block { locals: Vec<Local>, body: Vec<Stmt> },
+}
+
+#[derive(Debug, Clone)]
+pub struct Local {
+    pub name: String,
+    pub ty: ValueType,
+}
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Let { local: u32, value: Expr },
+    Assign { local: u32, value: Expr },
+    Store { address: Expr, value: Expr, width: StoreWidth },
+    If {
+        condition: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    While { condition: Expr, body: Vec<Stmt> },
+    Return { value: Option<Expr> },
+    Expr(Expr),
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone)]
@@ -145,8 +176,32 @@ pub enum Expr {
         index: u32,
         ty: ValueType,
     },
+    Local {
+        index: u32,
+        ty: ValueType,
+    },
     ConstI32(i32),
     ConstI64(i64),
+    LoadI32 {
+        address: Box<Expr>,
+    },
+    LoadI8 {
+        address: Box<Expr>,
+    },
+    LoadI64 {
+        address: Box<Expr>,
+    },
+    StateRead {
+        key_ptr: u32,
+        key_len: u32,
+        out_len_ptr: u32,
+        ty: ValueType,
+    },
+    StateReadRaw {
+        key_ptr: u32,
+        key_len: u32,
+        out_len_ptr: u32,
+    },
     Binary {
         op: BinaryOp,
         left: Box<Expr>,
@@ -157,15 +212,36 @@ pub enum Expr {
         function: HostFunction,
         args: Vec<Expr>,
     },
+    Select {
+        condition: Box<Expr>,
+        if_true: Box<Expr>,
+        if_false: Box<Expr>,
+        ty: ValueType,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreWidth {
+    I8,
+    I16,
+    I32,
+    I64,
 }
 
 impl Expr {
     pub fn value_type(&self) -> ValueType {
         match self {
             Expr::Param { ty, .. } => *ty,
+            Expr::Local { ty, .. } => *ty,
             Expr::ConstI32(_) => ValueType::I32,
             Expr::ConstI64(_) => ValueType::I64,
+            Expr::LoadI32 { .. } => ValueType::I32,
+            Expr::LoadI8 { .. } => ValueType::I32,
+            Expr::LoadI64 { .. } => ValueType::I64,
+            Expr::StateRead { ty, .. } => *ty,
+            Expr::StateReadRaw { .. } => ValueType::I32,
             Expr::Binary { ty, .. } => *ty,
+            Expr::Select { ty, .. } => *ty,
             Expr::HostCall { function, .. } => function
                 .return_type()
                 .expect("host call used in expression must return a value"),
@@ -180,6 +256,12 @@ pub enum BinaryOp {
     Mul,
     DivUInt,
     RemUInt,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,35 +274,68 @@ pub enum ValueType {
 pub enum HostFunction {
     SystemGetGasRemaining,
     SystemGetExecutionTime,
+    SystemAbort,
     MemoryDeterministicMalloc,
     MemoryDeterministicRealloc,
     MemoryUsage,
+    StdStateRead,
+    StdStateWrite,
+    StdGetCaller,
+    StdEmitEvent,
+    StdCryptoEd25519VerifyHex,
+    StdMapGet,
+    StdMapPut,
+    StdMapRemove,
+    StdMapContains,
 }
 
 impl HostFunction {
     const NO_PARAMS: &'static [ValueType] = &[];
     const I32_PARAM: &'static [ValueType] = &[ValueType::I32];
     const I32_I32_PARAMS: &'static [ValueType] = &[ValueType::I32, ValueType::I32];
+    const I32_I32_I32_PARAMS: &'static [ValueType] =
+        &[ValueType::I32, ValueType::I32, ValueType::I32];
+    const I32_I32_I32_I32_PARAMS: &'static [ValueType] =
+        &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32];
 
     pub fn from_identifier(name: &str) -> Option<Self> {
         match name {
             "get_gas_remaining" => Some(Self::SystemGetGasRemaining),
             "get_execution_time" => Some(Self::SystemGetExecutionTime),
+            "abort" => Some(Self::SystemAbort),
             "deterministic_malloc" => Some(Self::MemoryDeterministicMalloc),
             "deterministic_realloc" => Some(Self::MemoryDeterministicRealloc),
             "memory_usage" => Some(Self::MemoryUsage),
+            "state_read" => Some(Self::StdStateRead),
+            "state_write" => Some(Self::StdStateWrite),
+            "get_caller" => Some(Self::StdGetCaller),
+            "emit_event" => Some(Self::StdEmitEvent),
+            "ed25519_verify_hex" => Some(Self::StdCryptoEd25519VerifyHex),
+            "map_get" => Some(Self::StdMapGet),
+            "map_put" => Some(Self::StdMapPut),
+            "map_remove" => Some(Self::StdMapRemove),
+            "map_contains" => Some(Self::StdMapContains),
             _ => None,
         }
     }
 
     pub fn module(&self) -> &'static str {
         match self {
-            HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
-                "axiom_system"
-            }
+            HostFunction::SystemGetGasRemaining
+            | HostFunction::SystemGetExecutionTime
+            | HostFunction::SystemAbort => "axiom_system",
             HostFunction::MemoryDeterministicMalloc
             | HostFunction::MemoryDeterministicRealloc
             | HostFunction::MemoryUsage => "axiom_memory",
+            HostFunction::StdStateRead
+            | HostFunction::StdStateWrite
+            | HostFunction::StdGetCaller
+            | HostFunction::StdEmitEvent
+            | HostFunction::StdMapGet
+            | HostFunction::StdMapPut
+            | HostFunction::StdMapRemove
+            | HostFunction::StdMapContains => "std_runtime",
+            HostFunction::StdCryptoEd25519VerifyHex => "std_crypto",
         }
     }
 
@@ -228,20 +343,39 @@ impl HostFunction {
         match self {
             HostFunction::SystemGetGasRemaining => "get_gas_remaining",
             HostFunction::SystemGetExecutionTime => "get_execution_time",
+            HostFunction::SystemAbort => "abort",
             HostFunction::MemoryDeterministicMalloc => "deterministic_malloc",
             HostFunction::MemoryDeterministicRealloc => "deterministic_realloc",
             HostFunction::MemoryUsage => "memory_usage",
+            HostFunction::StdStateRead => "state_read",
+            HostFunction::StdStateWrite => "state_write",
+            HostFunction::StdGetCaller => "get_caller",
+            HostFunction::StdEmitEvent => "emit_event",
+            HostFunction::StdMapGet => "map_get",
+            HostFunction::StdMapPut => "map_put",
+            HostFunction::StdMapRemove => "map_remove",
+            HostFunction::StdMapContains => "map_contains",
+            HostFunction::StdCryptoEd25519VerifyHex => "ed25519_verify_hex",
         }
     }
 
     pub fn params(&self) -> &'static [ValueType] {
         match self {
-            HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
-                Self::NO_PARAMS
-            }
+            HostFunction::SystemGetGasRemaining
+            | HostFunction::SystemGetExecutionTime
+            | HostFunction::SystemAbort => Self::NO_PARAMS,
             HostFunction::MemoryDeterministicMalloc => Self::I32_PARAM,
             HostFunction::MemoryDeterministicRealloc => Self::I32_I32_PARAMS,
             HostFunction::MemoryUsage => Self::NO_PARAMS,
+            HostFunction::StdStateRead => Self::I32_I32_I32_PARAMS,
+            HostFunction::StdStateWrite => Self::I32_I32_I32_I32_PARAMS,
+            HostFunction::StdGetCaller => Self::NO_PARAMS,
+            HostFunction::StdEmitEvent => Self::I32_I32_PARAMS,
+            HostFunction::StdMapGet => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapPut => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapRemove => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdMapContains => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
+            HostFunction::StdCryptoEd25519VerifyHex => Self::I32_I32_I32_PARAMS,
         }
     }
 
@@ -250,9 +384,19 @@ impl HostFunction {
             HostFunction::SystemGetGasRemaining | HostFunction::SystemGetExecutionTime => {
                 Some(ValueType::I64)
             }
+            HostFunction::SystemAbort => None,
             HostFunction::MemoryDeterministicMalloc => Some(ValueType::I32),
             HostFunction::MemoryDeterministicRealloc => Some(ValueType::I32),
             HostFunction::MemoryUsage => Some(ValueType::I64),
+            HostFunction::StdStateRead => Some(ValueType::I32),
+            HostFunction::StdStateWrite => None,
+            HostFunction::StdGetCaller => Some(ValueType::I32),
+            HostFunction::StdEmitEvent => Some(ValueType::I32),
+            HostFunction::StdMapGet => Some(ValueType::I32),
+            HostFunction::StdMapPut => None,
+            HostFunction::StdMapRemove => None,
+            HostFunction::StdMapContains => Some(ValueType::I32),
+            HostFunction::StdCryptoEd25519VerifyHex => Some(ValueType::I32),
         }
     }
 }
@@ -296,6 +440,7 @@ pub fn lower_to_ir(program: &Program) -> Result<Module, IrError> {
                 })
             })
             .collect::<Result<_, _>>()?,
+        data_segments: Vec::new(),
     })
 }
 
@@ -548,21 +693,80 @@ fn collect_host_functions_from_function(
     function: &Function,
     collection: &mut BTreeSet<HostFunction>,
 ) {
-    let value = match &function.body {
-        FunctionBody::Return { value } => value,
-    };
+    match &function.body {
+        FunctionBody::Return { value } => {
+            if let Some(expr) = value {
+                collect_host_functions_from_expr(expr, collection);
+            }
+        }
+        FunctionBody::Block { body, .. } => {
+            for stmt in body {
+                collect_host_functions_from_stmt(stmt, collection);
+            }
+        }
+    }
+}
 
-    if let Some(expr) = value {
-        collect_host_functions_from_expr(expr, collection);
+fn collect_host_functions_from_stmt(stmt: &Stmt, collection: &mut BTreeSet<HostFunction>) {
+    match stmt {
+        Stmt::Let { value, .. }
+        | Stmt::Assign { value, .. }
+        | Stmt::Store { value, .. }
+        | Stmt::Expr(value) => {
+            collect_host_functions_from_expr(value, collection);
+        }
+        Stmt::Return { value } => {
+            if let Some(expr) = value {
+                collect_host_functions_from_expr(expr, collection);
+            }
+        }
+        Stmt::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_host_functions_from_expr(condition, collection);
+            for stmt in then_body {
+                collect_host_functions_from_stmt(stmt, collection);
+            }
+            for stmt in else_body {
+                collect_host_functions_from_stmt(stmt, collection);
+            }
+        }
+        Stmt::While { condition, body } => {
+            collect_host_functions_from_expr(condition, collection);
+            for stmt in body {
+                collect_host_functions_from_stmt(stmt, collection);
+            }
+        }
+        Stmt::Break | Stmt::Continue => {}
     }
 }
 
 fn collect_host_functions_from_expr(expr: &Expr, collection: &mut BTreeSet<HostFunction>) {
     match expr {
-        Expr::Param { .. } | Expr::ConstI32(_) | Expr::ConstI64(_) => {}
+        Expr::Param { .. }
+        | Expr::Local { .. }
+        | Expr::ConstI32(_)
+        | Expr::ConstI64(_)
+        | Expr::LoadI32 { .. }
+        | Expr::LoadI8 { .. }
+        | Expr::LoadI64 { .. }
+        | Expr::StateRead { .. }
+        | Expr::StateReadRaw { .. } => {}
         Expr::Binary { left, right, .. } => {
             collect_host_functions_from_expr(left, collection);
             collect_host_functions_from_expr(right, collection);
+        }
+        Expr::Select {
+            condition,
+            if_true,
+            if_false,
+            ..
+        } => {
+            collect_host_functions_from_expr(condition, collection);
+            collect_host_functions_from_expr(if_true, collection);
+            collect_host_functions_from_expr(if_false, collection);
         }
         Expr::HostCall { function, args } => {
             collection.insert(*function);

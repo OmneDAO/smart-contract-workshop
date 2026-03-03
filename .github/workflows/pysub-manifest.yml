@@ -1,0 +1,20 @@
+name: pysub-manifest-tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run manifest tests
+        working-directory: smart-contract-workshop
+        run: cargo test -p pysub-compiler -- manifest::tests

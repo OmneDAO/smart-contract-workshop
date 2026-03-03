@@ -1,0 +1,12 @@
+contract: token
+version: 0.0.1
+modules:
+  - name: token
+    path: token_simple.pysub
+entrypoints:
+  - module: token
+    name: init
+  - module: token
+    name: balance_of
+  - module: token
+    name: transfer
