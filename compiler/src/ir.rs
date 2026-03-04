@@ -208,6 +208,11 @@ pub enum Expr {
         right: Box<Expr>,
         ty: ValueType,
     },
+    Call {
+        function: String,
+        args: Vec<Expr>,
+        return_type: Option<ValueType>,
+    },
     HostCall {
         function: HostFunction,
         args: Vec<Expr>,
@@ -229,23 +234,27 @@ pub enum StoreWidth {
 }
 
 impl Expr {
-    pub fn value_type(&self) -> ValueType {
+    pub fn return_type(&self) -> Option<ValueType> {
         match self {
-            Expr::Param { ty, .. } => *ty,
-            Expr::Local { ty, .. } => *ty,
-            Expr::ConstI32(_) => ValueType::I32,
-            Expr::ConstI64(_) => ValueType::I64,
-            Expr::LoadI32 { .. } => ValueType::I32,
-            Expr::LoadI8 { .. } => ValueType::I32,
-            Expr::LoadI64 { .. } => ValueType::I64,
-            Expr::StateRead { ty, .. } => *ty,
-            Expr::StateReadRaw { .. } => ValueType::I32,
-            Expr::Binary { ty, .. } => *ty,
-            Expr::Select { ty, .. } => *ty,
-            Expr::HostCall { function, .. } => function
-                .return_type()
-                .expect("host call used in expression must return a value"),
+            Expr::Param { ty, .. } => Some(*ty),
+            Expr::Local { ty, .. } => Some(*ty),
+            Expr::ConstI32(_) => Some(ValueType::I32),
+            Expr::ConstI64(_) => Some(ValueType::I64),
+            Expr::LoadI32 { .. } => Some(ValueType::I32),
+            Expr::LoadI8 { .. } => Some(ValueType::I32),
+            Expr::LoadI64 { .. } => Some(ValueType::I64),
+            Expr::StateRead { ty, .. } => Some(*ty),
+            Expr::StateReadRaw { .. } => Some(ValueType::I32),
+            Expr::Binary { ty, .. } => Some(*ty),
+            Expr::Call { return_type, .. } => *return_type,
+            Expr::Select { ty, .. } => Some(*ty),
+            Expr::HostCall { function, .. } => function.return_type(),
         }
+    }
+
+    pub fn value_type(&self) -> ValueType {
+        self.return_type()
+            .expect("expression used in value position must return a value")
     }
 }
 
@@ -370,7 +379,7 @@ impl HostFunction {
             HostFunction::StdStateRead => Self::I32_I32_I32_PARAMS,
             HostFunction::StdStateWrite => Self::I32_I32_I32_I32_PARAMS,
             HostFunction::StdGetCaller => Self::NO_PARAMS,
-            HostFunction::StdEmitEvent => Self::I32_I32_PARAMS,
+            HostFunction::StdEmitEvent => Self::I32_I32_I32_PARAMS,
             HostFunction::StdMapGet => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapPut => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapRemove => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
@@ -767,6 +776,11 @@ fn collect_host_functions_from_expr(expr: &Expr, collection: &mut BTreeSet<HostF
             collect_host_functions_from_expr(condition, collection);
             collect_host_functions_from_expr(if_true, collection);
             collect_host_functions_from_expr(if_false, collection);
+        }
+        Expr::Call { args, .. } => {
+            for arg in args {
+                collect_host_functions_from_expr(arg, collection);
+            }
         }
         Expr::HostCall { function, args } => {
             collection.insert(*function);

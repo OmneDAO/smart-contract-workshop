@@ -112,6 +112,7 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
     let imported_function_count = host_function_indices.len() as u32;
 
     let mut defined_type_indices = Vec::with_capacity(bindings.len());
+    let mut defined_function_indices = HashMap::new();
 
     for binding in &bindings {
         let function = &binding.function;
@@ -120,6 +121,11 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
         append_function_type(&mut type_section, &param_types, function.return_type);
         next_type_index += 1;
         defined_type_indices.push(type_index);
+    }
+
+    for (func_index, binding) in bindings.iter().enumerate() {
+        let resolved_index = imported_function_count + func_index as u32;
+        defined_function_indices.insert(binding.function.name.clone(), resolved_index);
     }
 
     for type_index in &defined_type_indices {
@@ -134,7 +140,12 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
         }
 
         let mut body = WasmFunction::new(Vec::new());
-        emit_function_body(&binding.function, &mut body, &host_function_indices);
+        emit_function_body(
+            &binding.function,
+            &mut body,
+            &host_function_indices,
+            &defined_function_indices,
+        );
         body.instruction(&Instruction::End);
         code_section.function(&body);
     }
@@ -173,11 +184,12 @@ fn emit_function_body(
     function: &IrFunction,
     body: &mut WasmFunction,
     host_function_indices: &HashMap<HostFunction, u32>,
+    defined_function_indices: &HashMap<String, u32>,
 ) {
     match &function.body {
         FunctionBody::Return { value } => {
             if let Some(expr) = value {
-                emit_expr(expr, body, host_function_indices);
+                emit_expr(expr, body, host_function_indices, defined_function_indices);
             }
             body.instruction(&Instruction::Return);
         }
@@ -194,6 +206,7 @@ fn emit_function_body(
                 stmts,
                 body,
                 host_function_indices,
+                defined_function_indices,
                 &mut loop_stack,
             );
             body.instruction(&Instruction::Return);
@@ -207,10 +220,19 @@ fn emit_statements(
     stmts: &[Stmt],
     body: &mut WasmFunction,
     host_function_indices: &HashMap<HostFunction, u32>,
+    defined_function_indices: &HashMap<String, u32>,
     loop_stack: &mut Vec<LoopLabels>,
 ) {
     for stmt in stmts {
-        emit_statement(function, locals, stmt, body, host_function_indices, loop_stack);
+        emit_statement(
+            function,
+            locals,
+            stmt,
+            body,
+            host_function_indices,
+            defined_function_indices,
+            loop_stack,
+        );
     }
 }
 
@@ -220,16 +242,17 @@ fn emit_statement(
     stmt: &Stmt,
     body: &mut WasmFunction,
     host_function_indices: &HashMap<HostFunction, u32>,
+    defined_function_indices: &HashMap<String, u32>,
     loop_stack: &mut Vec<LoopLabels>,
 ) {
     match stmt {
         Stmt::Let { local, value } | Stmt::Assign { local, value } => {
-            emit_expr(value, body, host_function_indices);
+            emit_expr(value, body, host_function_indices, defined_function_indices);
             body.instruction(&Instruction::LocalSet(*local));
         }
         Stmt::Store { address, value, width } => {
-            emit_expr(address, body, host_function_indices);
-            emit_expr(value, body, host_function_indices);
+            emit_expr(address, body, host_function_indices, defined_function_indices);
+            emit_expr(value, body, host_function_indices, defined_function_indices);
             match width {
                 StoreWidth::I8 => body.instruction(&Instruction::I32Store8(MemArg {
                     offset: 0,
@@ -254,12 +277,14 @@ fn emit_statement(
             };
         }
         Stmt::Expr(expr) => {
-            emit_expr(expr, body, host_function_indices);
-            body.instruction(&Instruction::Drop);
+            emit_expr(expr, body, host_function_indices, defined_function_indices);
+            if expr.return_type().is_some() {
+                body.instruction(&Instruction::Drop);
+            }
         }
         Stmt::Return { value } => {
             if let Some(expr) = value {
-                emit_expr(expr, body, host_function_indices);
+                emit_expr(expr, body, host_function_indices, defined_function_indices);
             }
             body.instruction(&Instruction::Return);
         }
@@ -268,10 +293,18 @@ fn emit_statement(
             then_body,
             else_body,
         } => {
-            emit_expr(condition, body, host_function_indices);
+            emit_expr(condition, body, host_function_indices, defined_function_indices);
             emit_truthy_i32(condition, body);
             body.instruction(&Instruction::If(BlockType::Empty));
-            emit_statements(function, locals, then_body, body, host_function_indices, loop_stack);
+            emit_statements(
+                function,
+                locals,
+                then_body,
+                body,
+                host_function_indices,
+                defined_function_indices,
+                loop_stack,
+            );
             if !else_body.is_empty() {
                 body.instruction(&Instruction::Else);
                 emit_statements(
@@ -280,6 +313,7 @@ fn emit_statement(
                     else_body,
                     body,
                     host_function_indices,
+                    defined_function_indices,
                     loop_stack,
                 );
             }
@@ -292,10 +326,18 @@ fn emit_statement(
                 break_depth: 1,
                 continue_depth: 0,
             });
-            emit_expr(condition, body, host_function_indices);
+            emit_expr(condition, body, host_function_indices, defined_function_indices);
             emit_zero_check_i32(condition, body);
             body.instruction(&Instruction::BrIf(1));
-            emit_statements(function, locals, loop_body, body, host_function_indices, loop_stack);
+            emit_statements(
+                function,
+                locals,
+                loop_body,
+                body,
+                host_function_indices,
+                defined_function_indices,
+                loop_stack,
+            );
             body.instruction(&Instruction::Br(0));
             loop_stack.pop();
             body.instruction(&Instruction::End);
@@ -348,6 +390,7 @@ fn emit_expr(
     expr: &Expr,
     body: &mut WasmFunction,
     host_function_indices: &HashMap<HostFunction, u32>,
+    defined_function_indices: &HashMap<String, u32>,
 ) {
     match expr {
         Expr::Param { index, .. } => {
@@ -363,7 +406,7 @@ fn emit_expr(
             body.instruction(&Instruction::I64Const(*value));
         }
         Expr::LoadI32 { address } => {
-            emit_expr(address, body, host_function_indices);
+            emit_expr(address, body, host_function_indices, defined_function_indices);
             body.instruction(&Instruction::I32Load(MemArg {
                 offset: 0,
                 align: 2,
@@ -371,7 +414,7 @@ fn emit_expr(
             }));
         }
         Expr::LoadI8 { address } => {
-            emit_expr(address, body, host_function_indices);
+            emit_expr(address, body, host_function_indices, defined_function_indices);
             body.instruction(&Instruction::I32Load8U(MemArg {
                 offset: 0,
                 align: 0,
@@ -379,7 +422,7 @@ fn emit_expr(
             }));
         }
         Expr::LoadI64 { address } => {
-            emit_expr(address, body, host_function_indices);
+            emit_expr(address, body, host_function_indices, defined_function_indices);
             body.instruction(&Instruction::I64Load(MemArg {
                 offset: 0,
                 align: 3,
@@ -436,8 +479,8 @@ fn emit_expr(
             right,
             ty,
         } => {
-            emit_expr(left, body, host_function_indices);
-            emit_expr(right, body, host_function_indices);
+            emit_expr(left, body, host_function_indices, defined_function_indices);
+            emit_expr(right, body, host_function_indices, defined_function_indices);
             let operand_type = left.value_type();
             match (op, ty, operand_type) {
                 (BinaryOp::Add, ValueType::I32, _) => body.instruction(&Instruction::I32Add),
@@ -464,9 +507,23 @@ fn emit_expr(
                 (BinaryOp::GreaterEqual, _, ValueType::I64) => body.instruction(&Instruction::I64GeS),
             };
         }
+        Expr::Call {
+            function,
+            args,
+            return_type: _,
+        } => {
+            for arg in args {
+                emit_expr(arg, body, host_function_indices, defined_function_indices);
+            }
+            let index = defined_function_indices
+                .get(function)
+                .copied()
+                .expect("function call must reference defined function");
+            body.instruction(&Instruction::Call(index));
+        }
         Expr::HostCall { function, args } => {
             for arg in args {
-                emit_expr(arg, body, host_function_indices);
+                emit_expr(arg, body, host_function_indices, defined_function_indices);
             }
             let index = host_function_indices
                 .get(function)
@@ -480,9 +537,9 @@ fn emit_expr(
             if_false,
             ..
         } => {
-            emit_expr(if_true, body, host_function_indices);
-            emit_expr(if_false, body, host_function_indices);
-            emit_expr(condition, body, host_function_indices);
+            emit_expr(if_true, body, host_function_indices, defined_function_indices);
+            emit_expr(if_false, body, host_function_indices, defined_function_indices);
+            emit_expr(condition, body, host_function_indices, defined_function_indices);
             emit_truthy_i32(condition, body);
             body.instruction(&Instruction::Select);
         }
@@ -568,6 +625,7 @@ fn expr_needs_memory(expr: &Expr) -> bool {
         Expr::StateRead { .. } => true,
         Expr::StateReadRaw { .. } => true,
         Expr::Binary { left, right, .. } => expr_needs_memory(left) || expr_needs_memory(right),
+        Expr::Call { args, .. } => args.iter().any(expr_needs_memory),
         Expr::HostCall { args, .. } => args.iter().any(expr_needs_memory),
         Expr::Select {
             condition,
