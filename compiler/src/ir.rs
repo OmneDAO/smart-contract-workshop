@@ -253,8 +253,12 @@ impl Expr {
     }
 
     pub fn value_type(&self) -> ValueType {
-        self.return_type()
-            .expect("expression used in value position must return a value")
+        match self.return_type() {
+            Some(ty) => ty,
+            None => {
+                panic!("expression used in value position must return a value: {:?}", self);
+            }
+        }
     }
 }
 
