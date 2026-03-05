@@ -963,6 +963,19 @@ fn lower_stmt(
     Ok(())
 }
 
+fn boolify(expr: IrExpr) -> IrExpr {
+    let zero = match expr.value_type() {
+        ValueType::I32 => IrExpr::ConstI32(0),
+        ValueType::I64 => IrExpr::ConstI64(0),
+    };
+    IrExpr::Binary {
+        op: IrBinaryOp::NotEqual,
+        left: Box::new(expr),
+        right: Box::new(zero),
+        ty: ValueType::I32,
+    }
+}
+
 fn lower_expr(
     module: &str,
     function: &str,
@@ -976,19 +989,6 @@ fn lower_expr(
     structs: &HashMap<String, DslStruct>,
     function_signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<IrExpr, ManifestCompileError> {
-    fn boolify(expr: IrExpr) -> IrExpr {
-        let zero = match expr.value_type() {
-            ValueType::I32 => IrExpr::ConstI32(0),
-            ValueType::I64 => IrExpr::ConstI64(0),
-        };
-        IrExpr::Binary {
-            op: IrBinaryOp::NotEqual,
-            left: Box::new(expr),
-            right: Box::new(zero),
-            ty: ValueType::I32,
-        }
-    }
-
     match expr {
         DslExpr::Identifier(name) => {
             if let Some((index, ty)) = locals.get(name).copied() {
@@ -1518,6 +1518,185 @@ fn lower_expr_with_side_effects(
             let inferred = infer_dsl_type_from_expr(expr, param_dsl_types, local_dsl_types, state_fields, structs);
             return Ok((stmts, ptr, inferred));
         }
+        DslExpr::Binary { left, op, right } => {
+            let (mut left_stmts, left_expr, _) = lower_expr_with_side_effects(
+                module,
+                function,
+                left,
+                None,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                data_allocator,
+                state_fields,
+                structs,
+                function_signatures,
+            )?;
+            let (mut right_stmts, right_expr, _) = lower_expr_with_side_effects(
+                module,
+                function,
+                right,
+                None,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                data_allocator,
+                state_fields,
+                structs,
+                function_signatures,
+            )?;
+
+            let left_ty = left_expr.value_type();
+            let right_ty = right_expr.value_type();
+            if left_ty != right_ty {
+                return Err(ManifestCompileError::TypeMismatch {
+                    module: module.to_string(),
+                    expected: left_ty,
+                    found: right_ty,
+                });
+            }
+
+            let mut stmts = Vec::new();
+            stmts.append(&mut left_stmts);
+            stmts.append(&mut right_stmts);
+
+            let (ir_op, result_ty) = match op {
+                DslBinaryOp::Add => (IrBinaryOp::Add, left_ty),
+                DslBinaryOp::Sub => (IrBinaryOp::Sub, left_ty),
+                DslBinaryOp::Mul => (IrBinaryOp::Mul, left_ty),
+                DslBinaryOp::Div => (IrBinaryOp::DivUInt, left_ty),
+                DslBinaryOp::Mod => (IrBinaryOp::RemUInt, left_ty),
+                DslBinaryOp::Equal => (IrBinaryOp::Equal, ValueType::I32),
+                DslBinaryOp::NotEqual => (IrBinaryOp::NotEqual, ValueType::I32),
+                DslBinaryOp::Less => (IrBinaryOp::Less, ValueType::I32),
+                DslBinaryOp::LessEqual => (IrBinaryOp::LessEqual, ValueType::I32),
+                DslBinaryOp::Greater => (IrBinaryOp::Greater, ValueType::I32),
+                DslBinaryOp::GreaterEqual => (IrBinaryOp::GreaterEqual, ValueType::I32),
+                DslBinaryOp::LogicalAnd | DslBinaryOp::LogicalOr => {
+                    let left_bool = boolify(left_expr);
+                    let right_bool = boolify(right_expr);
+                    let expr = match op {
+                        DslBinaryOp::LogicalAnd => IrExpr::Binary {
+                            op: IrBinaryOp::Mul,
+                            left: Box::new(left_bool),
+                            right: Box::new(right_bool),
+                            ty: ValueType::I32,
+                        },
+                        DslBinaryOp::LogicalOr => {
+                            let sum = IrExpr::Binary {
+                                op: IrBinaryOp::Add,
+                                left: Box::new(left_bool),
+                                right: Box::new(right_bool),
+                                ty: ValueType::I32,
+                            };
+                            IrExpr::Binary {
+                                op: IrBinaryOp::NotEqual,
+                                left: Box::new(sum),
+                                right: Box::new(IrExpr::ConstI32(0)),
+                                ty: ValueType::I32,
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    return Ok((stmts, expr, Some(DslType::Bool)));
+                }
+            };
+
+            let expr = IrExpr::Binary {
+                op: ir_op,
+                left: Box::new(left_expr),
+                right: Box::new(right_expr),
+                ty: result_ty,
+            };
+
+            let inferred = if matches!(op, DslBinaryOp::Equal | DslBinaryOp::NotEqual | DslBinaryOp::Less | DslBinaryOp::LessEqual | DslBinaryOp::Greater | DslBinaryOp::GreaterEqual | DslBinaryOp::LogicalAnd | DslBinaryOp::LogicalOr) {
+                Some(DslType::Bool)
+            } else {
+                None
+            };
+
+            return Ok((stmts, expr, inferred));
+        }
+        DslExpr::Unary { op, expr } => {
+            let (stmts, lowered, _) = lower_expr_with_side_effects(
+                module,
+                function,
+                expr,
+                None,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                data_allocator,
+                state_fields,
+                structs,
+                function_signatures,
+            )?;
+            let (expr, inferred) = match op {
+                DslUnaryOp::Neg => (
+                    IrExpr::Binary {
+                        op: IrBinaryOp::Sub,
+                        left: Box::new(IrExpr::ConstI64(0)),
+                        right: Box::new(lowered),
+                        ty: ValueType::I64,
+                    },
+                    Some(DslType::Int { bits: 64 }),
+                ),
+                DslUnaryOp::Not => (boolify(lowered), Some(DslType::Bool)),
+            };
+            return Ok((stmts, expr, inferred));
+        }
+        DslExpr::Index { target, index } => {
+            let map_name = match target.as_ref() {
+                DslExpr::Identifier(name) => name,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("index target {target:?}"),
+                    })
+                }
+            };
+
+            let dsl_type = lookup_dsl_type(map_name, param_dsl_types, local_dsl_types, state_fields)
+                .ok_or_else(|| ManifestCompileError::UnknownIdentifier {
+                    module: module.to_string(),
+                    identifier: map_name.clone(),
+                })?;
+
+            let value_type = match dsl_type {
+                DslType::Map { key: _, value } => (*value).clone(),
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("index on non-map {dsl_type:?}"),
+                    })
+                }
+            };
+
+            let (stmts, value_expr) = lower_map_get_expr(
+                module,
+                map_name,
+                index,
+                &value_type,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                params.len(),
+                data_allocator,
+                state_fields,
+                function_signatures,
+                structs,
+            )?;
+
+            return Ok((stmts, value_expr, Some(value_type)));
+        }
         _ => {}
     }
 
@@ -1588,6 +1767,19 @@ fn infer_dsl_type_from_expr(
             })
         }
         DslExpr::Call { callee, args } => {
+            if let DslExpr::Attribute { target, attribute } = callee.as_ref() {
+                if attribute == "unwrap" {
+                    if let Some(DslType::Optional(inner)) = infer_dsl_type_from_expr(
+                        target,
+                        param_dsl_types,
+                        local_dsl_types,
+                        state_fields,
+                        structs,
+                    ) {
+                        return Some(*inner);
+                    }
+                }
+            }
             if let DslExpr::Identifier(name) = callee.as_ref() {
                 if name == "Some" {
                     let inner = call_args_to_positional("infer", args)
@@ -3282,6 +3474,30 @@ fn resolve_value_expr(
     data_allocator: &mut DataAllocator,
     state_fields: &HashMap<String, DslType>,
 ) -> Result<(IrExpr, DslType), ManifestCompileError> {
+    if let DslExpr::Call { callee, args } = expr {
+        if args.is_empty() {
+            if let DslExpr::Attribute { target, attribute } = callee.as_ref() {
+                if attribute == "unwrap" {
+                    let (base_expr, base_type) = resolve_value_expr(
+                        module,
+                        target,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        data_allocator,
+                        state_fields,
+                    )?;
+
+                    if let DslType::Optional(inner) = base_type {
+                        let expr = optional_unwrap_expr(module, (*inner).clone(), base_expr)?;
+                        return Ok((expr, *inner));
+                    }
+                }
+            }
+        }
+    }
+
     let name = match expr {
         DslExpr::Identifier(name) => name,
         _ => {
@@ -3421,19 +3637,53 @@ fn lower_attribute_call(
             }
         };
 
-        let positional = call_args_to_positional(module, args)?;
         return match attribute {
             "get" => {
-                if positional.is_empty() || positional.len() > 2 {
+                let mut key_expr: Option<DslExpr> = None;
+                let mut default_expr: Option<DslExpr> = None;
+
+                for arg in args {
+                    match arg {
+                        DslCallArg::Positional(expr) => {
+                            if key_expr.is_none() {
+                                key_expr = Some(expr.clone());
+                            } else if default_expr.is_none() {
+                                default_expr = Some(expr.clone());
+                            } else {
+                                return Err(ManifestCompileError::UnsupportedExpression {
+                                    module: module.to_string(),
+                                    expression: "map.get expects key and optional default".to_string(),
+                                });
+                            }
+                        }
+                        DslCallArg::Named { name, value } if name == "default" => {
+                            if default_expr.is_some() {
+                                return Err(ManifestCompileError::UnsupportedExpression {
+                                    module: module.to_string(),
+                                    expression: "map.get expects key and optional default".to_string(),
+                                });
+                            }
+                            default_expr = Some(value.clone());
+                        }
+                        _ => {
+                            return Err(ManifestCompileError::UnsupportedExpression {
+                                module: module.to_string(),
+                                expression: "map.get expects key and optional default".to_string(),
+                            })
+                        }
+                    }
+                }
+
+                let Some(key_expr) = key_expr else {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
                         expression: "map.get expects key and optional default".to_string(),
                     });
-                }
+                };
 
                 let (key_stmts, key_ptr, key_len) = lower_value_buffer(
                     module,
-                    &positional[0],
+                    &key_expr,
                     params,
                     locals,
                     param_dsl_types,
@@ -3474,12 +3724,11 @@ fn lower_attribute_call(
                 };
 
                 let found_value = map_value_from_ptr(module, &value, call)?;
-                let default_expr = positional.get(1);
                 let default_value = if let Some(default_expr) = default_expr {
                     let lowered = lower_expr(
                         module,
                         "map_default",
-                        default_expr,
+                        &default_expr,
                         params,
                         locals,
                         param_dsl_types,
@@ -3494,6 +3743,12 @@ fn lower_attribute_call(
                             module: module.to_string(),
                             expected: found_value.value_type(),
                             found: lowered.value_type(),
+                        });
+                    }
+                    if let IrExpr::HostCall { .. } = lowered {
+                        return Err(ManifestCompileError::UnsupportedExpression {
+                            module: module.to_string(),
+                            expression: "map.get default produced side effects".to_string(),
                         });
                     }
                     lowered
@@ -3519,6 +3774,7 @@ fn lower_attribute_call(
                 })
             }
             "contains" => {
+                let positional = call_args_to_positional(module, args)?;
                 if positional.len() != 1 {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
@@ -3552,6 +3808,7 @@ fn lower_attribute_call(
                 })
             }
             "remove" => {
+                let positional = call_args_to_positional(module, args)?;
                 if positional.len() != 1 {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
@@ -3708,19 +3965,53 @@ fn lower_attribute_call_with_side_effects(
             }
         };
 
-        let positional = call_args_to_positional(module, args)?;
         return match attribute {
             "get" => {
-                if positional.is_empty() || positional.len() > 2 {
+                let mut key_expr: Option<DslExpr> = None;
+                let mut default_expr: Option<DslExpr> = None;
+
+                for arg in args {
+                    match arg {
+                        DslCallArg::Positional(expr) => {
+                            if key_expr.is_none() {
+                                key_expr = Some(expr.clone());
+                            } else if default_expr.is_none() {
+                                default_expr = Some(expr.clone());
+                            } else {
+                                return Err(ManifestCompileError::UnsupportedExpression {
+                                    module: module.to_string(),
+                                    expression: "map.get expects key and optional default".to_string(),
+                                });
+                            }
+                        }
+                        DslCallArg::Named { name, value } if name == "default" => {
+                            if default_expr.is_some() {
+                                return Err(ManifestCompileError::UnsupportedExpression {
+                                    module: module.to_string(),
+                                    expression: "map.get expects key and optional default".to_string(),
+                                });
+                            }
+                            default_expr = Some(value.clone());
+                        }
+                        _ => {
+                            return Err(ManifestCompileError::UnsupportedExpression {
+                                module: module.to_string(),
+                                expression: "map.get expects key and optional default".to_string(),
+                            })
+                        }
+                    }
+                }
+
+                let Some(key_expr) = key_expr else {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
                         expression: "map.get expects key and optional default".to_string(),
                     });
-                }
+                };
 
                 let (mut stmts, key_ptr, key_len) = lower_value_buffer(
                     module,
-                    &positional[0],
+                    &key_expr,
                     params,
                     locals,
                     param_dsl_types,
@@ -3755,12 +4046,11 @@ fn lower_attribute_call_with_side_effects(
                 };
 
                 let found_value = map_value_from_ptr(module, &value, call)?;
-                let default_expr = positional.get(1);
                 let default_value = if let Some(default_expr) = default_expr {
                     let (mut default_stmts, lowered, _) = lower_expr_with_side_effects(
                         module,
                         "map_default",
-                        default_expr,
+                        &default_expr,
                         None,
                         params,
                         locals,
@@ -3806,6 +4096,7 @@ fn lower_attribute_call_with_side_effects(
                 ))
             }
             "contains" => {
+                let positional = call_args_to_positional(module, args)?;
                 if positional.len() != 1 {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
@@ -3834,6 +4125,7 @@ fn lower_attribute_call_with_side_effects(
                 Ok((stmts, expr))
             }
             "remove" => {
+                let positional = call_args_to_positional(module, args)?;
                 if positional.len() != 1 {
                     return Err(ManifestCompileError::UnsupportedExpression {
                         module: module.to_string(),
@@ -4072,12 +4364,7 @@ fn lower_map_get_expr(
         function_signatures,
         structs,
     )?;
-    if !key_stmts.is_empty() {
-        return Err(ManifestCompileError::UnsupportedExpression {
-            module: module.to_string(),
-            expression: format!("map index requires simple key {key_expr:?}"),
-        });
-    }
+    let stmts = key_stmts;
 
     let (map_ptr, map_len) = map_name_buffer(map_name, data_allocator);
     let out_len_ptr = data_allocator.allocate(vec![0, 0, 0, 0]);
@@ -4120,7 +4407,7 @@ fn lower_map_get_expr(
         ty: map_type(module, value_type)?,
     };
 
-    Ok((Vec::new(), value))
+    Ok((stmts, value))
 }
 
 fn lower_state_write_stmt(
@@ -4302,6 +4589,7 @@ fn call_args_to_positional(
         match arg {
             DslCallArg::Positional(expr) => positional.push(expr.clone()),
             DslCallArg::Named { .. } => {
+                eprintln!("named args not supported in {}: {:?}", module, args);
                 return Err(ManifestCompileError::UnsupportedExpression {
                     module: module.to_string(),
                     expression: "named args not supported here".to_string(),
