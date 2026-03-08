@@ -1,4 +1,4 @@
-fn main() -> u128:
+fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:
     return 0
 
 contract Token:

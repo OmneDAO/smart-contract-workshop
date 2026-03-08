@@ -21,7 +21,7 @@ fn validates_token_example() {
 #[test]
 fn rejects_duplicate_storage_field() {
     let source = r#"
-fn main() -> u128:
+fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:
     return 0
 
 contract Dup:
@@ -39,7 +39,7 @@ contract Dup:
 #[test]
 fn rejects_invalid_map_key() {
     let source = r#"
-fn main() -> u128:
+fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:
     return 0
 
 contract BadMap:
@@ -56,7 +56,7 @@ contract BadMap:
 #[test]
 fn rejects_duplicate_parameters() {
     let source = r#"
-fn main() -> u128:
+fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:
     return 0
 
 fn clash(a: u128, a: bool):
@@ -76,7 +76,7 @@ fn rejects_reserved_entry_name() {
 fn axiom_entry_main() -> u128:
     return 0
 
-fn main() -> u128:
+fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:
     return 0
 "#;
 

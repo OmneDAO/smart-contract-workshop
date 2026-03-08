@@ -5,7 +5,7 @@ use pysub_compiler::{compile_to_ir, compile_to_wasm};
 #[test]
 fn lowering_records_function_signatures_and_body() {
     let source =
-        "fn main() -> u128:\n    return 0\n\nfn add(a: u128, b: u128) -> u128:\n    return a + b\n";
+        "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\nfn add(a: u128, b: u128) -> u128:\n    return a + b\n";
     let ir_module = compile_to_ir(source).expect("IR lowering");
     assert_eq!(ir_module.functions.len(), 2);
 
@@ -26,7 +26,7 @@ fn lowering_records_function_signatures_and_body() {
 
 #[test]
 fn lowering_handles_contract_members() {
-    let source = "fn main() -> u128:\n    return 0\n\ncontract Wallet(owner: address):\n    storage balance: u128 = 0\n\n    fn balance() -> u128:\n        return 0\n";
+    let source = "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\ncontract Wallet(owner: address):\n    storage balance: u128 = 0\n\n    fn balance() -> u128:\n        return 0\n";
     let ir_module = compile_to_ir(source).expect("IR lowering");
     assert_eq!(ir_module.contracts.len(), 1);
 
@@ -46,7 +46,7 @@ fn lowering_handles_contract_members() {
 #[test]
 fn wasm_exports_all_functions() {
     let source =
-        "fn main() -> u128:\n    return 0\n\nfn ping():\n    return\n\ncontract Wallet:\n    fn balance() -> u128:\n        return 0\n";
+        "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\nfn ping():\n    return\n\ncontract Wallet:\n    fn balance() -> u128:\n        return 0\n";
     let wasm = compile_to_wasm(source).expect("WASM emission");
     assert!(wasm.starts_with(b"\0asm"));
 
@@ -77,7 +77,7 @@ fn wasm_exports_all_functions() {
 #[test]
 fn wasm_contains_add_instructions() {
     let source =
-        "fn main() -> u128:\n    return 0\n\nfn add(a: u128, b: u128) -> u128:\n    return a + b\n";
+        "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\nfn add(a: u128, b: u128) -> u128:\n    return a + b\n";
     let wasm = compile_to_wasm(source).expect("emit wasm");
     let bodies = decode_function_ops(&wasm);
     assert_eq!(bodies.len(), 2);
@@ -95,7 +95,7 @@ fn wasm_contains_add_instructions() {
 
 #[test]
 fn wasm_handles_constant_returns() {
-    let source = "fn main() -> u128:\n    return 0\n\nfn always_true() -> bool:\n    return true\n";
+    let source = "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\nfn always_true() -> bool:\n    return true\n";
     let wasm = compile_to_wasm(source).expect("emit wasm");
     let bodies = decode_function_ops(&wasm);
     assert_eq!(bodies.len(), 2);
@@ -108,7 +108,7 @@ fn wasm_handles_constant_returns() {
 
 #[test]
 fn wasm_imports_system_helpers() {
-    let source = "fn main() -> u128:\n    return get_gas_remaining()\n";
+    let source = "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return get_gas_remaining()\n";
     let wasm = compile_to_wasm(source).expect("emit wasm");
 
     let mut imports = Vec::new();
@@ -135,7 +135,7 @@ fn wasm_imports_system_helpers() {
 
 #[test]
 fn wasm_imports_memory_helpers() {
-    let source = "fn main() -> u128:\n    return 0\n\nfn alloc() -> address:\n    return deterministic_malloc(16)\n";
+    let source = "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128:\n    return 0\n\nfn alloc() -> address:\n    return deterministic_malloc(16)\n";
     let wasm = compile_to_wasm(source).expect("emit wasm");
 
     let mut imports = Vec::new();

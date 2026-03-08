@@ -47,8 +47,10 @@ impl fmt::Display for Ident {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimitiveType {
     U128,
+    U64,
     Bool,
     Bytes,
+    String,
     Address,
 }
 
@@ -62,8 +64,10 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Primitive(PrimitiveType::U128) => write!(f, "u128"),
+            Type::Primitive(PrimitiveType::U64) => write!(f, "u64"),
             Type::Primitive(PrimitiveType::Bool) => write!(f, "bool"),
             Type::Primitive(PrimitiveType::Bytes) => write!(f, "bytes"),
+            Type::Primitive(PrimitiveType::String) => write!(f, "string"),
             Type::Primitive(PrimitiveType::Address) => write!(f, "address"),
             Type::Map { key, value } => write!(f, "map[{key}, {value}]"),
         }
@@ -908,8 +912,10 @@ fn parse_type(pair: Pair<Rule>) -> Result<Type, AstError> {
         ),
         Rule::primitive_type => match pair.as_str() {
             "u128" => Ok(Type::Primitive(PrimitiveType::U128)),
+            "u64" => Ok(Type::Primitive(PrimitiveType::U64)),
             "bool" => Ok(Type::Primitive(PrimitiveType::Bool)),
             "bytes" => Ok(Type::Primitive(PrimitiveType::Bytes)),
+            "string" => Ok(Type::Primitive(PrimitiveType::String)),
             "address" => Ok(Type::Primitive(PrimitiveType::Address)),
             other => Err(AstError::InvalidType { ty: other.into() }),
         },
