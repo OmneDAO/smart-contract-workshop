@@ -295,7 +295,12 @@ pub enum HostFunction {
     StdStateWrite,
     StdGetCaller,
     StdEmitEvent,
+    StdRequireRole,
+    StdEmit,
+    StdTimestamp,
     StdCryptoEd25519VerifyHex,
+    StdCryptoSha256,
+    StdMathDivFloor,
     StdMapGet,
     StdMapPut,
     StdMapRemove,
@@ -310,6 +315,7 @@ impl HostFunction {
         &[ValueType::I32, ValueType::I32, ValueType::I32];
     const I32_I32_I32_I32_PARAMS: &'static [ValueType] =
         &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32];
+    const I64_I64_PARAMS: &'static [ValueType] = &[ValueType::I64, ValueType::I64];
 
     pub fn from_identifier(name: &str) -> Option<Self> {
         match name {
@@ -323,7 +329,12 @@ impl HostFunction {
             "state_write" => Some(Self::StdStateWrite),
             "get_caller" => Some(Self::StdGetCaller),
             "emit_event" => Some(Self::StdEmitEvent),
+            "require_role" => Some(Self::StdRequireRole),
+            "emit" => Some(Self::StdEmit),
+            "timestamp" => Some(Self::StdTimestamp),
             "ed25519_verify_hex" => Some(Self::StdCryptoEd25519VerifyHex),
+            "sha256" => Some(Self::StdCryptoSha256),
+            "div_floor" => Some(Self::StdMathDivFloor),
             "map_get" => Some(Self::StdMapGet),
             "map_put" => Some(Self::StdMapPut),
             "map_remove" => Some(Self::StdMapRemove),
@@ -344,11 +355,15 @@ impl HostFunction {
             | HostFunction::StdStateWrite
             | HostFunction::StdGetCaller
             | HostFunction::StdEmitEvent
+            | HostFunction::StdRequireRole
+            | HostFunction::StdEmit
+            | HostFunction::StdTimestamp
             | HostFunction::StdMapGet
             | HostFunction::StdMapPut
             | HostFunction::StdMapRemove
             | HostFunction::StdMapContains => "std_runtime",
-            HostFunction::StdCryptoEd25519VerifyHex => "std_crypto",
+            HostFunction::StdCryptoEd25519VerifyHex | HostFunction::StdCryptoSha256 => "std_crypto",
+            HostFunction::StdMathDivFloor => "std_math",
         }
     }
 
@@ -364,11 +379,16 @@ impl HostFunction {
             HostFunction::StdStateWrite => "state_write",
             HostFunction::StdGetCaller => "get_caller",
             HostFunction::StdEmitEvent => "emit_event",
+            HostFunction::StdRequireRole => "require_role",
+            HostFunction::StdEmit => "emit",
+            HostFunction::StdTimestamp => "timestamp",
             HostFunction::StdMapGet => "map_get",
             HostFunction::StdMapPut => "map_put",
             HostFunction::StdMapRemove => "map_remove",
             HostFunction::StdMapContains => "map_contains",
             HostFunction::StdCryptoEd25519VerifyHex => "ed25519_verify_hex",
+            HostFunction::StdCryptoSha256 => "sha256",
+            HostFunction::StdMathDivFloor => "div_floor",
         }
     }
 
@@ -384,11 +404,16 @@ impl HostFunction {
             HostFunction::StdStateWrite => Self::I32_I32_I32_I32_PARAMS,
             HostFunction::StdGetCaller => Self::NO_PARAMS,
             HostFunction::StdEmitEvent => Self::I32_I32_I32_PARAMS,
+            HostFunction::StdRequireRole => Self::I32_I32_I32_I32_PARAMS,
+            HostFunction::StdEmit => Self::I32_I32_I32_I32_PARAMS,
+            HostFunction::StdTimestamp => Self::I32_I32_PARAMS,
             HostFunction::StdMapGet => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapPut => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapRemove => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapContains => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdCryptoEd25519VerifyHex => Self::I32_I32_I32_PARAMS,
+            HostFunction::StdCryptoSha256 => Self::I32_I32_I32_PARAMS,
+            HostFunction::StdMathDivFloor => Self::I64_I64_PARAMS,
         }
     }
 
@@ -405,11 +430,16 @@ impl HostFunction {
             HostFunction::StdStateWrite => None,
             HostFunction::StdGetCaller => Some(ValueType::I32),
             HostFunction::StdEmitEvent => Some(ValueType::I32),
+            HostFunction::StdRequireRole => Some(ValueType::I32),
+            HostFunction::StdEmit => None,
+            HostFunction::StdTimestamp => Some(ValueType::I64),
             HostFunction::StdMapGet => Some(ValueType::I32),
             HostFunction::StdMapPut => None,
             HostFunction::StdMapRemove => None,
             HostFunction::StdMapContains => Some(ValueType::I32),
             HostFunction::StdCryptoEd25519VerifyHex => Some(ValueType::I32),
+            HostFunction::StdCryptoSha256 => Some(ValueType::I32),
+            HostFunction::StdMathDivFloor => Some(ValueType::I64),
         }
     }
 }
@@ -809,9 +839,12 @@ fn try_coerce_host_argument(expr: Expr, expected: ValueType) -> Option<Expr> {
 
 fn convert_type(ty: &Type) -> ValueType {
     match ty {
-        Type::Primitive(PrimitiveType::U128) => ValueType::I64,
+        Type::Primitive(PrimitiveType::U128) | Type::Primitive(PrimitiveType::U64) => {
+            ValueType::I64
+        }
         Type::Primitive(PrimitiveType::Bool)
         | Type::Primitive(PrimitiveType::Bytes)
+        | Type::Primitive(PrimitiveType::String)
         | Type::Primitive(PrimitiveType::Address) => ValueType::I32,
         Type::Map { .. } => ValueType::I32,
     }

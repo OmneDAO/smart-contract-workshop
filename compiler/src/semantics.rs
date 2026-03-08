@@ -74,30 +74,12 @@ impl SemanticAnalyzer {
 
             if function.name.as_str() == "main" {
                 has_main = true;
-                if !function.params.is_empty() {
+                if !is_valid_entry_signature(function) {
                     return Err(SemanticError::InvalidEntrySignature {
                         function: "main".to_string(),
-                        expected: "fn main() -> u128".to_string(),
-                        found: format_function_signature(function),
+                        expected: expected_entry_signature(),
+                        found: format_function_signature_with_names(function),
                     });
-                }
-
-                match &function.return_type {
-                    Some(Type::Primitive(PrimitiveType::U128)) => {}
-                    Some(other) => {
-                        return Err(SemanticError::InvalidEntrySignature {
-                            function: "main".to_string(),
-                            expected: "fn main() -> u128".to_string(),
-                            found: format!("fn main() -> {}", other),
-                        })
-                    }
-                    None => {
-                        return Err(SemanticError::InvalidEntrySignature {
-                            function: "main".to_string(),
-                            expected: "fn main() -> u128".to_string(),
-                            found: format_function_signature(function),
-                        })
-                    }
                 }
             }
         }
@@ -187,11 +169,11 @@ impl SemanticAnalyzer {
     }
 }
 
-fn format_function_signature(function: &Function) -> String {
+fn format_function_signature_with_names(function: &Function) -> String {
     let params = function
         .params
         .iter()
-        .map(|param| param.ty.to_string())
+        .map(|param| format!("{}: {}", param.name, param.ty))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -206,6 +188,42 @@ fn format_function_signature(function: &Function) -> String {
     } else {
         format!("fn {}({})", function.name, params)
     }
+}
+
+fn expected_entry_signature() -> String {
+    "fn main(sender: address, recipient: address, amount: u128, timestamp: u64, metadata: string, nonce: u64, signature: bytes, sender_pubkey: bytes, memo: string) -> u128".to_string()
+}
+
+fn is_valid_entry_signature(function: &Function) -> bool {
+    let expected = expected_entry_params();
+    if function.params.len() != expected.len() {
+        return false;
+    }
+
+    for (param, (name, ty)) in function.params.iter().zip(expected.iter()) {
+        if param.name.as_str() != *name || &param.ty != ty {
+            return false;
+        }
+    }
+
+    matches!(
+        function.return_type,
+        Some(Type::Primitive(PrimitiveType::U128))
+    )
+}
+
+fn expected_entry_params() -> Vec<(&'static str, Type)> {
+    vec![
+        ("sender", Type::Primitive(PrimitiveType::Address)),
+        ("recipient", Type::Primitive(PrimitiveType::Address)),
+        ("amount", Type::Primitive(PrimitiveType::U128)),
+        ("timestamp", Type::Primitive(PrimitiveType::U64)),
+        ("metadata", Type::Primitive(PrimitiveType::String)),
+        ("nonce", Type::Primitive(PrimitiveType::U64)),
+        ("signature", Type::Primitive(PrimitiveType::Bytes)),
+        ("sender_pubkey", Type::Primitive(PrimitiveType::Bytes)),
+        ("memo", Type::Primitive(PrimitiveType::String)),
+    ]
 }
 
 pub fn validate_program(program: &Program) -> Result<(), SemanticError> {

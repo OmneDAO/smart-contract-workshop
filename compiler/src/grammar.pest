@@ -78,4 +78,4 @@ identifier = @{ !keyword_start ~ (ASCII_ALPHA | "_") ~ ident_char* }
 
 ty = _{ map_type | primitive_type }
 map_type = { "map" ~ "[" ~ ty ~ "," ~ ty ~ "]" }
-primitive_type = { "u128" | "bool" | "bytes" | "address" }
+primitive_type = { "u128" | "u64" | "bool" | "bytes" | "string" | "address" }

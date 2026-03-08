@@ -235,6 +235,37 @@ pub fn compile_manifest_to_ir(path: &Path) -> Result<IrModule, ManifestCompileEr
         }
     }
 
+    let mut global_state_fields: HashMap<String, DslType> = HashMap::new();
+    let mut global_struct_defs: HashMap<String, DslStruct> = HashMap::new();
+    for module in &manifest.modules {
+        let parsed = parsed_modules.get(&module.name).ok_or_else(|| ManifestCompileError::MissingModule {
+            module: module.name.clone(),
+        })?;
+        for field in &parsed.state_fields {
+            if let Some(existing) = global_state_fields.get(&field.name) {
+                if existing != &field.ty {
+                    return Err(ManifestCompileError::InvalidSignature {
+                        module: module.name.clone(),
+                        signature: field.name.clone(),
+                        reason: "duplicate state field name across modules".to_string(),
+                    });
+                }
+            } else {
+                global_state_fields.insert(field.name.clone(), field.ty.clone());
+            }
+        }
+        for def in &parsed.structs {
+            if global_struct_defs.contains_key(&def.name) {
+                return Err(ManifestCompileError::InvalidSignature {
+                    module: module.name.clone(),
+                    signature: def.name.clone(),
+                    reason: "duplicate struct name across modules".to_string(),
+                });
+            }
+            global_struct_defs.insert(def.name.clone(), def.clone());
+        }
+    }
+
     for module in &manifest.modules {
         let parsed = parsed_modules.get(&module.name).ok_or_else(|| {
             ManifestCompileError::MissingModule {
@@ -247,6 +278,8 @@ pub fn compile_manifest_to_ir(path: &Path) -> Result<IrModule, ManifestCompileEr
             parsed,
             &entrypoint_lookup,
             &mut data_allocator,
+            &global_state_fields,
+            &global_struct_defs,
             &function_signatures,
         )?;
         module_functions.insert(module.name.clone(), functions);
@@ -341,16 +374,12 @@ fn lower_dsl_module(
     module: &dsl::DslModule,
     entrypoints: &HashMap<(String, String), ()>,
     data_allocator: &mut DataAllocator,
+    global_state_fields: &HashMap<String, DslType>,
+    global_struct_defs: &HashMap<String, DslStruct>,
     function_signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<Vec<IrFunction>, ManifestCompileError> {
-    let mut state_fields = HashMap::new();
-    for field in &module.state_fields {
-        state_fields.insert(field.name.clone(), field.ty.clone());
-    }
-    let mut struct_defs = HashMap::new();
-    for def in &module.structs {
-        struct_defs.insert(def.name.clone(), def.clone());
-    }
+    let state_fields = global_state_fields;
+    let struct_defs = global_struct_defs;
     let mut functions = Vec::new();
     for function in &module.functions {
         let is_entry = entrypoints.contains_key(&(module_name.to_string(), function.name.clone()));
@@ -510,8 +539,8 @@ fn lower_stmt(
             output.append(&mut stmts);
             output.push(IrStmt::Let { local: index, value: expr });
         }
-        DslStmt::Assign { target, value } => {
-            if let DslExpr::Index { target, index } = target {
+        DslStmt::Assign { target, value } => match target {
+            DslExpr::Index { target, index } => {
                 let map_name = match target.as_ref() {
                     DslExpr::Identifier(name) => name,
                     other => {
@@ -572,56 +601,39 @@ fn lower_stmt(
                     function: crate::ir::HostFunction::StdMapPut,
                     args: vec![map_ptr, map_len, key_ptr, key_len, value_ptr, value_len],
                 }));
-                return Ok(());
             }
-
-            let target_name = match target {
-                DslExpr::Identifier(name) => name,
-                other => {
-                    return Err(ManifestCompileError::UnsupportedStatement {
-                        module: module.to_string(),
-                        statement: format!("assign to {:?}", other),
-                    })
-                }
-            };
-            if let Some((index, ty)) = locals.get(target_name).copied() {
-                let expected_dsl = local_dsl_types.get(target_name).cloned();
-                let (mut stmts, expr, inferred_dsl) = lower_expr_with_side_effects(
+            DslExpr::Attribute { target: struct_target, attribute: field_name } => {
+                let (struct_expr, struct_type) = resolve_value_expr(
                     module,
-                    function,
-                    value,
-                    expected_dsl.clone(),
+                    struct_target,
                     params,
                     locals,
                     param_dsl_types,
                     local_dsl_types,
-                    local_defs,
                     data_allocator,
                     state_fields,
                     structs,
                     function_signatures,
                 )?;
-                if expr.value_type() != ty {
-                    return Err(ManifestCompileError::TypeMismatch {
+                let struct_name = match struct_type {
+                    DslType::Custom(name) => name,
+                    _ => {
+                        return Err(ManifestCompileError::UnsupportedStatement {
+                            module: module.to_string(),
+                            statement: format!("assign to non-struct {struct_type:?}"),
+                        })
+                    }
+                };
+                let struct_def = structs.get(&struct_name).ok_or_else(|| {
+                    ManifestCompileError::UnsupportedType {
                         module: module.to_string(),
-                        expected: ty,
-                        found: expr.value_type(),
-                    });
-                }
-                if let Some(dsl_type) = inferred_dsl.or(expected_dsl) {
-                    local_dsl_types.insert(target_name.clone(), dsl_type);
-                }
-                output.append(&mut stmts);
-                output.push(IrStmt::Assign { local: index, value: expr });
-            } else if state_fields.contains_key(target_name) {
-                let (stmts, call) = lower_state_write_stmt(
+                        ty: struct_name.clone(),
+                    }
+                })?;
+
+                let (mut value_stmts, value_ptr, value_len) = lower_value_buffer(
                     module,
-                    &[
-                        DslCallArg::Positional(DslExpr::Literal(DslLiteral::String(
-                            target_name.clone(),
-                        ))),
-                        DslCallArg::Positional(value.clone()),
-                    ],
+                    value,
                     params,
                     locals,
                     param_dsl_types,
@@ -633,37 +645,127 @@ fn lower_stmt(
                     function_signatures,
                     structs,
                 )?;
-                output.extend(stmts);
-                output.push(IrStmt::Expr(call));
-            } else {
-                let (mut stmts, expr, inferred_dsl) = lower_expr_with_side_effects(
-                    module,
-                    function,
-                    value,
-                    None,
-                    params,
-                    locals,
-                    param_dsl_types,
-                    local_dsl_types,
+
+                let (mut rebuild_stmts, new_struct_ptr) = lower_struct_rebuild_with_field_override(
+                    struct_expr,
+                    struct_def,
+                    field_name,
+                    value_ptr,
+                    value_len,
                     local_defs,
-                    data_allocator,
-                    state_fields,
-                    structs,
-                    function_signatures,
+                    params.len(),
                 )?;
-                let index = (params.len() + local_defs.len()) as u32;
-                local_defs.push(IrLocal {
-                    name: target_name.clone(),
-                    ty: expr.value_type(),
+                value_stmts.append(&mut rebuild_stmts);
+                output.append(&mut value_stmts);
+
+                let base_name = match struct_target.as_ref() {
+                    DslExpr::Identifier(name) => name,
+                    _ => {
+                        return Err(ManifestCompileError::UnsupportedStatement {
+                            module: module.to_string(),
+                            statement: "assign target must be a local struct".to_string(),
+                        })
+                    }
+                };
+                let (local_idx, _) = locals.get(base_name).copied().ok_or_else(|| {
+                    ManifestCompileError::UnsupportedStatement {
+                        module: module.to_string(),
+                        statement: "assign target must be a local struct".to_string(),
+                    }
+                })?;
+                output.push(IrStmt::Assign {
+                    local: local_idx,
+                    value: new_struct_ptr,
                 });
-                locals.insert(target_name.clone(), (index, expr.value_type()));
-                if let Some(dsl_type) = inferred_dsl {
-                    local_dsl_types.insert(target_name.clone(), dsl_type);
-                }
-                output.append(&mut stmts);
-                output.push(IrStmt::Let { local: index, value: expr });
             }
-        }
+            DslExpr::Identifier(target_name) => {
+                if let Some((index, ty)) = locals.get(target_name).copied() {
+                    let expected_dsl = local_dsl_types.get(target_name).cloned();
+                    let (mut stmts, expr, inferred_dsl) = lower_expr_with_side_effects(
+                        module,
+                        function,
+                        value,
+                        expected_dsl.clone(),
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                        function_signatures,
+                    )?;
+                    if expr.value_type() != ty {
+                        return Err(ManifestCompileError::TypeMismatch {
+                            module: module.to_string(),
+                            expected: ty,
+                            found: expr.value_type(),
+                        });
+                    }
+                    if let Some(dsl_type) = inferred_dsl.or(expected_dsl) {
+                        local_dsl_types.insert(target_name.clone(), dsl_type);
+                    }
+                    output.append(&mut stmts);
+                    output.push(IrStmt::Assign { local: index, value: expr });
+                } else if state_fields.contains_key(target_name) {
+                    let (stmts, call) = lower_state_write_stmt(
+                        module,
+                        &[
+                            DslCallArg::Positional(DslExpr::Literal(DslLiteral::String(
+                                target_name.clone(),
+                            ))),
+                            DslCallArg::Positional(value.clone()),
+                        ],
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    output.extend(stmts);
+                    output.push(IrStmt::Expr(call));
+                } else {
+                    let (mut stmts, expr, inferred_dsl) = lower_expr_with_side_effects(
+                        module,
+                        function,
+                        value,
+                        None,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                        function_signatures,
+                    )?;
+                    let index = (params.len() + local_defs.len()) as u32;
+                    local_defs.push(IrLocal {
+                        name: target_name.clone(),
+                        ty: expr.value_type(),
+                    });
+                    locals.insert(target_name.clone(), (index, expr.value_type()));
+                    if let Some(dsl_type) = inferred_dsl {
+                        local_dsl_types.insert(target_name.clone(), dsl_type);
+                    }
+                    output.append(&mut stmts);
+                    output.push(IrStmt::Let { local: index, value: expr });
+                }
+            }
+            other => {
+                return Err(ManifestCompileError::UnsupportedStatement {
+                    module: module.to_string(),
+                    statement: format!("assign to {:?}", other),
+                })
+            }
+        },
         DslStmt::If {
             branches,
             else_branch,
@@ -1023,10 +1125,9 @@ fn lower_expr(
         }
         DslExpr::Literal(literal) => lower_literal(module, literal, data_allocator),
         DslExpr::ListLiteral(_) | DslExpr::MapLiteral(_) => {
-            Err(ManifestCompileError::UnsupportedExpression {
-                module: module.to_string(),
-                expression: format!("literal {expr:?}"),
-            })
+            let bytes = literal_to_bytes(module, expr, structs)?;
+            let offset = data_allocator.allocate(bytes);
+            Ok(IrExpr::ConstI32(offset as i32))
         }
         DslExpr::Attribute { target, attribute } => {
             let (base_expr, base_type) = resolve_value_expr(
@@ -1038,6 +1139,8 @@ fn lower_expr(
                 local_dsl_types,
                 data_allocator,
                 state_fields,
+                structs,
+                function_signatures,
             )?;
             if let DslType::Optional(_) = base_type {
                 return match attribute.as_str() {
@@ -1247,13 +1350,65 @@ fn lower_expr(
                 );
             }
             if let DslExpr::Identifier(name) = callee.as_ref() {
+                if matches!(
+                    name.as_str(),
+                    "uint128" | "uint64" | "uint32" | "int64" | "int32"
+                ) {
+                    let positional = call_args_to_positional(module, args)?;
+                    if positional.len() != 1 {
+                        return Err(ManifestCompileError::UnsupportedExpression {
+                            module: module.to_string(),
+                            expression: format!("{name} expects one argument"),
+                        });
+                    }
+                    let lowered = lower_expr(
+                        module,
+                        function,
+                        &positional[0],
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                        function_signatures,
+                    )?;
+                    if lowered.value_type() != ValueType::I64 {
+                        return Err(ManifestCompileError::TypeMismatch {
+                            module: module.to_string(),
+                            expected: ValueType::I64,
+                            found: lowered.value_type(),
+                        });
+                    }
+                    return Ok(lowered);
+                }
+                if matches!(name.as_str(), "require_role" | "timestamp" | "sha256" | "emit") {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("call {name} requires side effects"),
+                    });
+                }
                 if name == "state_read" {
-                    return lower_state_read(module, args, data_allocator, structs);
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "state_read requires side effects".to_string(),
+                    });
                 }
                 if let Some(host) = crate::ir::HostFunction::from_identifier(name) {
                     let expected = host.params();
                     let positional = call_args_to_positional(module, args)?;
                     if positional.len() != expected.len() {
+                        if name == "assert_authorized" {
+                            return Err(ManifestCompileError::UnsupportedExpression {
+                                module: module.to_string(),
+                                expression: format!(
+                                    "{name} arity mismatch (expected {}, found {})",
+                                    expected.len(),
+                                    positional.len()
+                                ),
+                            });
+                        }
                         return Err(ManifestCompileError::UnsupportedExpression {
                             module: module.to_string(),
                             expression: format!("{name} arity mismatch"),
@@ -1287,7 +1442,27 @@ fn lower_expr(
                 }
 
                 if let Some(sig) = function_signatures.get(name) {
-                    let positional = call_args_to_positional(module, args)?;
+                    let mut positional = call_args_to_positional(module, args)?;
+                    if name == "assert_authorized" && sig.params.len() == 3 {
+                        if positional.len() == 2 {
+                            positional.push(DslExpr::Literal(DslLiteral::None));
+                        } else if positional.len() == 3 {
+                            let is_optional = match &positional[2] {
+                                DslExpr::Call { callee, .. } => {
+                                    matches!(callee.as_ref(), DslExpr::Identifier(name) if name == "Some")
+                                }
+                                DslExpr::Literal(DslLiteral::None) => true,
+                                _ => false,
+                            };
+                            if !is_optional {
+                                let wrapped = DslExpr::Call {
+                                    callee: Box::new(DslExpr::Identifier("Some".to_string())),
+                                    args: vec![DslCallArg::Positional(positional[2].clone())],
+                                };
+                                positional[2] = wrapped;
+                            }
+                        }
+                    }
                     if positional.len() != sig.params.len() {
                         return Err(ManifestCompileError::UnsupportedExpression {
                             module: module.to_string(),
@@ -1395,6 +1570,170 @@ fn lower_expr_with_side_effects(
                 return Ok((stmts, expr, inferred));
             }
             if let DslExpr::Identifier(name) = callee.as_ref() {
+                if matches!(
+                    name.as_str(),
+                    "uint128" | "uint64" | "uint32" | "int64" | "int32"
+                ) {
+                    let positional = call_args_to_positional(module, args)?;
+                    if positional.len() != 1 {
+                        return Err(ManifestCompileError::UnsupportedExpression {
+                            module: module.to_string(),
+                            expression: format!("{name} expects one argument"),
+                        });
+                    }
+                    let (stmts, lowered, _) = lower_expr_with_side_effects(
+                        module,
+                        function,
+                        &positional[0],
+                        None,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                        function_signatures,
+                    )?;
+                    if lowered.value_type() != ValueType::I64 {
+                        return Err(ManifestCompileError::TypeMismatch {
+                            module: module.to_string(),
+                            expected: ValueType::I64,
+                            found: lowered.value_type(),
+                        });
+                    }
+                    let inferred = match name.as_str() {
+                        "uint128" => DslType::Uint { bits: 128 },
+                        "uint64" => DslType::Uint { bits: 64 },
+                        "uint32" => DslType::Uint { bits: 32 },
+                        "int64" => DslType::Int { bits: 64 },
+                        "int32" => DslType::Int { bits: 32 },
+                        _ => DslType::Any,
+                    };
+                    return Ok((stmts, lowered, Some(inferred)));
+                }
+                if name == "state_read" {
+                    let (stmts, expr) = lower_state_read_dynamic(
+                        module,
+                        args,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    return Ok((
+                        stmts,
+                        expr,
+                        Some(DslType::Optional(Box::new(DslType::Bytes))),
+                    ));
+                }
+                if name == "require_role" {
+                    let (stmts, expr) = lower_std_require_role_expr(
+                        module,
+                        args,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    return Ok((stmts, expr, Some(DslType::Bool)));
+                }
+                if name == "timestamp" {
+                    let (stmts, expr) = lower_std_timestamp_expr(
+                        module,
+                        args,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    return Ok((stmts, expr, Some(DslType::Int { bits: 64 })));
+                }
+                if name == "sha256" {
+                    let (stmts, expr) = lower_std_sha256_expr(
+                        module,
+                        args,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    return Ok((stmts, expr, Some(DslType::Bytes)));
+                }
+                if name == "emit" {
+                    let stmts = lower_std_emit_stmt(
+                        module,
+                        args,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        params.len(),
+                        data_allocator,
+                        state_fields,
+                        function_signatures,
+                        structs,
+                    )?;
+                    return Ok((stmts, IrExpr::ConstI32(0), None));
+                }
+                if name == "str" {
+                    let positional = call_args_to_positional(module, args)?;
+                    if positional.len() != 1 {
+                        return Err(ManifestCompileError::UnsupportedExpression {
+                            module: module.to_string(),
+                            expression: "str expects one argument".to_string(),
+                        });
+                    }
+                    let (mut arg_stmts, lowered, _) = lower_expr_with_side_effects(
+                        module,
+                        function,
+                        &positional[0],
+                        None,
+                        params,
+                        locals,
+                        param_dsl_types,
+                        local_dsl_types,
+                        local_defs,
+                        data_allocator,
+                        state_fields,
+                        structs,
+                        function_signatures,
+                    )?;
+                    let (mut str_stmts, str_ptr) = lower_i64_to_string_buffer(
+                        module,
+                        lowered,
+                        local_defs,
+                        params.len(),
+                    )?;
+                    arg_stmts.append(&mut str_stmts);
+                    return Ok((arg_stmts, str_ptr, Some(DslType::String)));
+                }
                 if name == "Some" {
                     let positional = call_args_to_positional(module, args)?;
                     let opt_type = match expected_dsl.clone() {
@@ -1448,7 +1787,27 @@ fn lower_expr_with_side_effects(
                 }
 
                 if let Some(sig) = function_signatures.get(name) {
-                    let positional = call_args_to_positional(module, args)?;
+                    let mut positional = call_args_to_positional(module, args)?;
+                    if name == "assert_authorized" && sig.params.len() == 3 {
+                        if positional.len() == 2 {
+                            positional.push(DslExpr::Literal(DslLiteral::None));
+                        } else if positional.len() == 3 {
+                            let is_optional = match &positional[2] {
+                                DslExpr::Call { callee, .. } => {
+                                    matches!(callee.as_ref(), DslExpr::Identifier(name) if name == "Some")
+                                }
+                                DslExpr::Literal(DslLiteral::None) => true,
+                                _ => false,
+                            };
+                            if !is_optional {
+                                let wrapped = DslExpr::Call {
+                                    callee: Box::new(DslExpr::Identifier("Some".to_string())),
+                                    args: vec![DslCallArg::Positional(positional[2].clone())],
+                                };
+                                positional[2] = wrapped;
+                            }
+                        }
+                    }
                     if positional.len() != sig.params.len() {
                         return Err(ManifestCompileError::UnsupportedExpression {
                             module: module.to_string(),
@@ -1779,8 +2138,58 @@ fn infer_dsl_type_from_expr(
                         return Some(*inner);
                     }
                 }
+                if attribute == "to_hex" {
+                    if let Some(DslType::Bytes) = infer_dsl_type_from_expr(
+                        target,
+                        param_dsl_types,
+                        local_dsl_types,
+                        state_fields,
+                        structs,
+                    ) {
+                        return Some(DslType::String);
+                    }
+                }
+                if let Some(DslType::Map { value, .. }) = infer_dsl_type_from_expr(
+                    target,
+                    param_dsl_types,
+                    local_dsl_types,
+                    state_fields,
+                    structs,
+                ) {
+                    return match attribute.as_str() {
+                        "get" => Some(*value),
+                        "contains" => Some(DslType::Bool),
+                        _ => None,
+                    };
+                }
+                if let Some(DslType::Optional(_)) = infer_dsl_type_from_expr(
+                    target,
+                    param_dsl_types,
+                    local_dsl_types,
+                    state_fields,
+                    structs,
+                ) {
+                    return match attribute.as_str() {
+                        "is_some" | "is_none" => Some(DslType::Bool),
+                        _ => None,
+                    };
+                }
             }
             if let DslExpr::Identifier(name) = callee.as_ref() {
+                match name.as_str() {
+                    "uint128" => return Some(DslType::Uint { bits: 128 }),
+                    "uint64" => return Some(DslType::Uint { bits: 64 }),
+                    "uint32" => return Some(DslType::Uint { bits: 32 }),
+                    "int64" => return Some(DslType::Int { bits: 64 }),
+                    "int32" => return Some(DslType::Int { bits: 32 }),
+                    _ => {}
+                }
+                if name == "str" {
+                    return Some(DslType::String);
+                }
+                if name == "state_read" {
+                    return Some(DslType::Optional(Box::new(DslType::Bytes)));
+                }
                 if name == "Some" {
                     let inner = call_args_to_positional("infer", args)
                         .ok()
@@ -1974,6 +2383,823 @@ fn emit_copy_bytes(
     });
     stmts.push(IrStmt::While { condition, body });
     stmts
+}
+
+fn lower_list_append_buffer(
+    module: &str,
+    list_ptr: IrExpr,
+    element_expr: &DslExpr,
+    element_type: &DslType,
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<(Vec<IrStmt>, IrExpr, IrExpr), ManifestCompileError> {
+    let (mut stmts, old_len_expr) =
+        list_total_length(module, list_ptr.clone(), element_type, local_defs, params_len)?;
+    let old_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__list_old_len");
+    stmts.push(IrStmt::Let {
+        local: old_len_idx,
+        value: old_len_expr,
+    });
+
+    let (mut elem_stmts, elem_ptr, elem_len) = lower_value_buffer(
+        module,
+        element_expr,
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+    stmts.append(&mut elem_stmts);
+
+    let elem_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__list_elem_len");
+    stmts.push(IrStmt::Let {
+        local: elem_len_idx,
+        value: elem_len,
+    });
+
+    let new_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__list_new_len");
+    stmts.push(IrStmt::Let {
+        local: new_len_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: old_len_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::Local {
+                index: elem_len_idx,
+                ty: ValueType::I32,
+            },
+        ),
+    });
+
+    let new_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__list_new_ptr");
+    stmts.push(IrStmt::Let {
+        local: new_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::Local {
+                index: new_len_idx,
+                ty: ValueType::I32,
+            }],
+        },
+    });
+
+    let copy_old = emit_copy_bytes(
+        params_len,
+        local_defs,
+        list_ptr.clone(),
+        IrExpr::Local {
+            index: new_ptr_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::Local {
+            index: old_len_idx,
+            ty: ValueType::I32,
+        },
+    );
+    stmts.extend(copy_old);
+
+    let new_count = add_i32(load_i32(list_ptr), IrExpr::ConstI32(1));
+    stmts.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: new_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: new_count,
+        width: StoreWidth::I32,
+    });
+
+    let elem_dest = add_i32(
+        IrExpr::Local {
+            index: new_ptr_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::Local {
+            index: old_len_idx,
+            ty: ValueType::I32,
+        },
+    );
+    let copy_elem = emit_copy_bytes(
+        params_len,
+        local_defs,
+        elem_ptr,
+        elem_dest,
+        IrExpr::Local {
+            index: elem_len_idx,
+            ty: ValueType::I32,
+        },
+    );
+    stmts.extend(copy_elem);
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: new_ptr_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::Local {
+            index: new_len_idx,
+            ty: ValueType::I32,
+        },
+    ))
+}
+
+fn lower_struct_rebuild_with_field_override(
+    base_expr: IrExpr,
+    struct_def: &DslStruct,
+    override_field: &str,
+    override_ptr: IrExpr,
+    override_len: IrExpr,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let mut stmts = Vec::new();
+    let payload_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__struct_payload");
+    stmts.push(IrStmt::Let {
+        local: payload_len_idx,
+        value: IrExpr::ConstI32(0),
+    });
+
+    let cursor_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__struct_cursor");
+    stmts.push(IrStmt::Let {
+        local: cursor_idx,
+        value: add_i32(base_expr, IrExpr::ConstI32(4)),
+    });
+
+    let mut field_entries = Vec::new();
+    for field in &struct_def.fields {
+        let field_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__field_len");
+        stmts.push(IrStmt::Let {
+            local: field_len_idx,
+            value: load_i32(IrExpr::Local {
+                index: cursor_idx,
+                ty: ValueType::I32,
+            }),
+        });
+        let field_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__field_ptr");
+        stmts.push(IrStmt::Let {
+            local: field_ptr_idx,
+            value: add_i32(
+                IrExpr::Local {
+                    index: cursor_idx,
+                    ty: ValueType::I32,
+                },
+                IrExpr::ConstI32(4),
+            ),
+        });
+
+        let (len_expr, ptr_expr) = if field.name == override_field {
+            (override_len.clone(), override_ptr.clone())
+        } else {
+            (
+                IrExpr::Local {
+                    index: field_len_idx,
+                    ty: ValueType::I32,
+                },
+                IrExpr::Local {
+                    index: field_ptr_idx,
+                    ty: ValueType::I32,
+                },
+            )
+        };
+
+        stmts.push(IrStmt::Assign {
+            local: payload_len_idx,
+            value: add_i32(
+                add_i32(
+                    IrExpr::Local {
+                        index: payload_len_idx,
+                        ty: ValueType::I32,
+                    },
+                    len_expr.clone(),
+                ),
+                IrExpr::ConstI32(4),
+            ),
+        });
+        field_entries.push((len_expr, ptr_expr));
+
+        stmts.push(IrStmt::Assign {
+            local: cursor_idx,
+            value: add_i32(
+                IrExpr::Local {
+                    index: field_ptr_idx,
+                    ty: ValueType::I32,
+                },
+                IrExpr::Local {
+                    index: field_len_idx,
+                    ty: ValueType::I32,
+                },
+            ),
+        });
+    }
+
+    let total_len_expr = add_i32(
+        IrExpr::Local {
+            index: payload_len_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::ConstI32(4),
+    );
+    let struct_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__struct_ptr");
+    stmts.push(IrStmt::Let {
+        local: struct_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![total_len_expr],
+        },
+    });
+    stmts.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: struct_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::Local {
+            index: payload_len_idx,
+            ty: ValueType::I32,
+        },
+        width: StoreWidth::I32,
+    });
+
+    let out_cursor_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__struct_cursor_out");
+    stmts.push(IrStmt::Let {
+        local: out_cursor_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: struct_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+    });
+
+    for (len_expr, ptr_expr) in field_entries {
+        stmts.push(IrStmt::Store {
+            address: IrExpr::Local {
+                index: out_cursor_idx,
+                ty: ValueType::I32,
+            },
+            value: len_expr.clone(),
+            width: StoreWidth::I32,
+        });
+        stmts.push(IrStmt::Assign {
+            local: out_cursor_idx,
+            value: add_i32(
+                IrExpr::Local {
+                    index: out_cursor_idx,
+                    ty: ValueType::I32,
+                },
+                IrExpr::ConstI32(4),
+            ),
+        });
+        let copy_stmts = emit_copy_bytes(
+            params_len,
+            local_defs,
+            ptr_expr,
+            IrExpr::Local {
+                index: out_cursor_idx,
+                ty: ValueType::I32,
+            },
+            len_expr.clone(),
+        );
+        stmts.extend(copy_stmts);
+        stmts.push(IrStmt::Assign {
+            local: out_cursor_idx,
+            value: add_i32(
+                IrExpr::Local {
+                    index: out_cursor_idx,
+                    ty: ValueType::I32,
+                },
+                len_expr,
+            ),
+        });
+    }
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: struct_ptr_idx,
+            ty: ValueType::I32,
+        },
+    ))
+}
+
+fn lower_i64_to_string_buffer(
+    module: &str,
+    value_expr: IrExpr,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    if value_expr.value_type() != ValueType::I64 {
+        return Err(ManifestCompileError::TypeMismatch {
+            module: module.to_string(),
+            expected: ValueType::I64,
+            found: value_expr.value_type(),
+        });
+    }
+
+    let mut stmts = Vec::new();
+    let value_idx = add_temp_local(local_defs, params_len, ValueType::I64, "__itoa_value");
+    stmts.push(IrStmt::Let {
+        local: value_idx,
+        value: value_expr,
+    });
+
+    let temp_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_tmp");
+    stmts.push(IrStmt::Let {
+        local: temp_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::ConstI32(8)],
+        },
+    });
+
+    let buf_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_buf");
+    stmts.push(IrStmt::Let {
+        local: buf_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::ConstI32(24)],
+        },
+    });
+
+    let digits_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_digits");
+    stmts.push(IrStmt::Let {
+        local: digits_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: buf_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+    });
+
+    let len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_len");
+    stmts.push(IrStmt::Let {
+        local: len_idx,
+        value: IrExpr::ConstI32(0),
+    });
+
+    let is_zero = IrExpr::Binary {
+        op: IrBinaryOp::Equal,
+        left: Box::new(IrExpr::Local {
+            index: value_idx,
+            ty: ValueType::I64,
+        }),
+        right: Box::new(IrExpr::ConstI64(0)),
+        ty: ValueType::I32,
+    };
+
+    let mut zero_body = Vec::new();
+    zero_body.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: digits_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::ConstI32(48),
+        width: StoreWidth::I8,
+    });
+    zero_body.push(IrStmt::Assign {
+        local: len_idx,
+        value: IrExpr::ConstI32(1),
+    });
+
+    let mut non_zero_body = Vec::new();
+    let digit_idx = add_temp_local(local_defs, params_len, ValueType::I64, "__itoa_digit");
+    let condition = IrExpr::Binary {
+        op: IrBinaryOp::Greater,
+        left: Box::new(IrExpr::Local {
+            index: value_idx,
+            ty: ValueType::I64,
+        }),
+        right: Box::new(IrExpr::ConstI64(0)),
+        ty: ValueType::I32,
+    };
+    let mut loop_body = Vec::new();
+    loop_body.push(IrStmt::Let {
+        local: digit_idx,
+        value: IrExpr::Binary {
+            op: IrBinaryOp::RemUInt,
+            left: Box::new(IrExpr::Local {
+                index: value_idx,
+                ty: ValueType::I64,
+            }),
+            right: Box::new(IrExpr::ConstI64(10)),
+            ty: ValueType::I64,
+        },
+    });
+    loop_body.push(IrStmt::Assign {
+        local: value_idx,
+        value: IrExpr::Binary {
+            op: IrBinaryOp::DivUInt,
+            left: Box::new(IrExpr::Local {
+                index: value_idx,
+                ty: ValueType::I64,
+            }),
+            right: Box::new(IrExpr::ConstI64(10)),
+            ty: ValueType::I64,
+        },
+    });
+    loop_body.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: temp_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::Binary {
+            op: IrBinaryOp::Add,
+            left: Box::new(IrExpr::Local {
+                index: digit_idx,
+                ty: ValueType::I64,
+            }),
+            right: Box::new(IrExpr::ConstI64(48)),
+            ty: ValueType::I64,
+        },
+        width: StoreWidth::I64,
+    });
+    loop_body.push(IrStmt::Store {
+        address: add_i32(
+            IrExpr::Local {
+                index: digits_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::Local {
+                index: len_idx,
+                ty: ValueType::I32,
+            },
+        ),
+        value: load_i32(IrExpr::Local {
+            index: temp_ptr_idx,
+            ty: ValueType::I32,
+        }),
+        width: StoreWidth::I8,
+    });
+    loop_body.push(IrStmt::Assign {
+        local: len_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: len_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(1),
+        ),
+    });
+    non_zero_body.push(IrStmt::While { condition, body: loop_body });
+
+    stmts.push(IrStmt::If {
+        condition: is_zero,
+        then_body: zero_body,
+        else_body: non_zero_body,
+    });
+
+    let i_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_i");
+    let j_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__itoa_j");
+    stmts.push(IrStmt::Let {
+        local: i_idx,
+        value: IrExpr::ConstI32(0),
+    });
+    stmts.push(IrStmt::Let {
+        local: j_idx,
+        value: IrExpr::Binary {
+            op: IrBinaryOp::Sub,
+            left: Box::new(IrExpr::Local {
+                index: len_idx,
+                ty: ValueType::I32,
+            }),
+            right: Box::new(IrExpr::ConstI32(1)),
+            ty: ValueType::I32,
+        },
+    });
+
+    let reverse_condition = IrExpr::Binary {
+        op: IrBinaryOp::Less,
+        left: Box::new(IrExpr::Local {
+            index: i_idx,
+            ty: ValueType::I32,
+        }),
+        right: Box::new(IrExpr::Local {
+            index: j_idx,
+            ty: ValueType::I32,
+        }),
+        ty: ValueType::I32,
+    };
+    let mut reverse_body = Vec::new();
+    let left_ptr = add_i32(
+        IrExpr::Local {
+            index: digits_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::Local {
+            index: i_idx,
+            ty: ValueType::I32,
+        },
+    );
+    let right_ptr = add_i32(
+        IrExpr::Local {
+            index: digits_idx,
+            ty: ValueType::I32,
+        },
+        IrExpr::Local {
+            index: j_idx,
+            ty: ValueType::I32,
+        },
+    );
+    let left_byte = IrExpr::LoadI8 {
+        address: Box::new(left_ptr.clone()),
+    };
+    let right_byte = IrExpr::LoadI8 {
+        address: Box::new(right_ptr.clone()),
+    };
+    reverse_body.push(IrStmt::Store {
+        address: left_ptr,
+        value: right_byte,
+        width: StoreWidth::I8,
+    });
+    reverse_body.push(IrStmt::Store {
+        address: right_ptr,
+        value: left_byte,
+        width: StoreWidth::I8,
+    });
+    reverse_body.push(IrStmt::Assign {
+        local: i_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: i_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(1),
+        ),
+    });
+    reverse_body.push(IrStmt::Assign {
+        local: j_idx,
+        value: IrExpr::Binary {
+            op: IrBinaryOp::Sub,
+            left: Box::new(IrExpr::Local {
+                index: j_idx,
+                ty: ValueType::I32,
+            }),
+            right: Box::new(IrExpr::ConstI32(1)),
+            ty: ValueType::I32,
+        },
+    });
+    stmts.push(IrStmt::While {
+        condition: reverse_condition,
+        body: reverse_body,
+    });
+
+    stmts.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: buf_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::Local {
+            index: len_idx,
+            ty: ValueType::I32,
+        },
+        width: StoreWidth::I32,
+    });
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: buf_idx,
+            ty: ValueType::I32,
+        },
+    ))
+}
+
+fn lower_bytes_to_hex_buffer(
+    bytes_ptr: IrExpr,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let mut stmts = Vec::new();
+    let len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_len");
+    stmts.push(IrStmt::Let {
+        local: len_idx,
+        value: load_i32(bytes_ptr.clone()),
+    });
+
+    let data_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_data");
+    stmts.push(IrStmt::Let {
+        local: data_ptr_idx,
+        value: add_i32(bytes_ptr, IrExpr::ConstI32(4)),
+    });
+
+    let hex_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_out_len");
+    stmts.push(IrStmt::Let {
+        local: hex_len_idx,
+        value: IrExpr::Binary {
+            op: IrBinaryOp::Mul,
+            left: Box::new(IrExpr::Local {
+                index: len_idx,
+                ty: ValueType::I32,
+            }),
+            right: Box::new(IrExpr::ConstI32(2)),
+            ty: ValueType::I32,
+        },
+    });
+
+    let total_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_total");
+    stmts.push(IrStmt::Let {
+        local: total_len_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: hex_len_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+    });
+
+    let out_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_out_ptr");
+    stmts.push(IrStmt::Let {
+        local: out_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::Local {
+                index: total_len_idx,
+                ty: ValueType::I32,
+            }],
+        },
+    });
+    stmts.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::Local {
+            index: hex_len_idx,
+            ty: ValueType::I32,
+        },
+        width: StoreWidth::I32,
+    });
+
+    let out_data_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_out_data");
+    stmts.push(IrStmt::Let {
+        local: out_data_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: out_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+    });
+
+    let i_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__hex_i");
+    stmts.push(IrStmt::Let {
+        local: i_idx,
+        value: IrExpr::ConstI32(0),
+    });
+    let condition = IrExpr::Binary {
+        op: IrBinaryOp::Less,
+        left: Box::new(IrExpr::Local {
+            index: i_idx,
+            ty: ValueType::I32,
+        }),
+        right: Box::new(IrExpr::Local {
+            index: len_idx,
+            ty: ValueType::I32,
+        }),
+        ty: ValueType::I32,
+    };
+
+    let mut body = Vec::new();
+    let byte_expr = IrExpr::LoadI8 {
+        address: Box::new(add_i32(
+            IrExpr::Local {
+                index: data_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::Local {
+                index: i_idx,
+                ty: ValueType::I32,
+            },
+        )),
+    };
+    let hi_expr = IrExpr::Binary {
+        op: IrBinaryOp::DivUInt,
+        left: Box::new(byte_expr.clone()),
+        right: Box::new(IrExpr::ConstI32(16)),
+        ty: ValueType::I32,
+    };
+    let lo_expr = IrExpr::Binary {
+        op: IrBinaryOp::RemUInt,
+        left: Box::new(byte_expr),
+        right: Box::new(IrExpr::ConstI32(16)),
+        ty: ValueType::I32,
+    };
+
+    let hi_is_digit = IrExpr::Binary {
+        op: IrBinaryOp::Less,
+        left: Box::new(hi_expr.clone()),
+        right: Box::new(IrExpr::ConstI32(10)),
+        ty: ValueType::I32,
+    };
+    let hi_char = IrExpr::Select {
+        condition: Box::new(hi_is_digit),
+        if_true: Box::new(add_i32(hi_expr.clone(), IrExpr::ConstI32(48))),
+        if_false: Box::new(add_i32(
+            IrExpr::Binary {
+                op: IrBinaryOp::Sub,
+                left: Box::new(hi_expr),
+                right: Box::new(IrExpr::ConstI32(10)),
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(97),
+        )),
+        ty: ValueType::I32,
+    };
+
+    let lo_is_digit = IrExpr::Binary {
+        op: IrBinaryOp::Less,
+        left: Box::new(lo_expr.clone()),
+        right: Box::new(IrExpr::ConstI32(10)),
+        ty: ValueType::I32,
+    };
+    let lo_char = IrExpr::Select {
+        condition: Box::new(lo_is_digit),
+        if_true: Box::new(add_i32(lo_expr.clone(), IrExpr::ConstI32(48))),
+        if_false: Box::new(add_i32(
+            IrExpr::Binary {
+                op: IrBinaryOp::Sub,
+                left: Box::new(lo_expr),
+                right: Box::new(IrExpr::ConstI32(10)),
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(97),
+        )),
+        ty: ValueType::I32,
+    };
+
+    let out_offset = IrExpr::Binary {
+        op: IrBinaryOp::Mul,
+        left: Box::new(IrExpr::Local {
+            index: i_idx,
+            ty: ValueType::I32,
+        }),
+        right: Box::new(IrExpr::ConstI32(2)),
+        ty: ValueType::I32,
+    };
+    body.push(IrStmt::Store {
+        address: add_i32(
+            IrExpr::Local {
+                index: out_data_idx,
+                ty: ValueType::I32,
+            },
+            out_offset.clone(),
+        ),
+        value: hi_char,
+        width: StoreWidth::I8,
+    });
+    body.push(IrStmt::Store {
+        address: add_i32(
+            add_i32(
+                IrExpr::Local {
+                    index: out_data_idx,
+                    ty: ValueType::I32,
+                },
+                out_offset,
+            ),
+            IrExpr::ConstI32(1),
+        ),
+        value: lo_char,
+        width: StoreWidth::I8,
+    });
+    body.push(IrStmt::Assign {
+        local: i_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: i_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(1),
+        ),
+    });
+
+    stmts.push(IrStmt::While { condition, body });
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+    ))
 }
 
 fn lower_optional_none_buffer(
@@ -2794,6 +4020,7 @@ fn lower_for_list_iterable(
         state_fields,
         data_allocator,
         structs,
+        function_signatures,
     )?;
 
     let (binding_idx, binding_new) = ensure_binding_local(
@@ -3203,6 +4430,7 @@ fn resolve_list_iterable(
     state_fields: &HashMap<String, DslType>,
     data_allocator: &mut DataAllocator,
     structs: &HashMap<String, DslStruct>,
+    function_signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<(IrExpr, DslType), ManifestCompileError> {
     let name = match iterable {
         DslExpr::Identifier(name) => name,
@@ -3216,6 +4444,8 @@ fn resolve_list_iterable(
                 local_dsl_types,
                 data_allocator,
                 state_fields,
+                structs,
+                function_signatures,
             )?;
             let struct_name = match base_type {
                 DslType::Custom(name) => name,
@@ -3473,6 +4703,8 @@ fn resolve_value_expr(
     local_dsl_types: &HashMap<String, DslType>,
     data_allocator: &mut DataAllocator,
     state_fields: &HashMap<String, DslType>,
+    structs: &HashMap<String, DslStruct>,
+    function_signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<(IrExpr, DslType), ManifestCompileError> {
     if let DslExpr::Call { callee, args } = expr {
         if args.is_empty() {
@@ -3487,6 +4719,8 @@ fn resolve_value_expr(
                         local_dsl_types,
                         data_allocator,
                         state_fields,
+                        structs,
+                        function_signatures,
                     )?;
 
                     if let DslType::Optional(inner) = base_type {
@@ -3496,6 +4730,111 @@ fn resolve_value_expr(
                 }
             }
         }
+    }
+
+    if let DslExpr::Attribute { target, attribute } = expr {
+        let (base_expr, base_type) = resolve_value_expr(
+            module,
+            target,
+            params,
+            locals,
+            param_dsl_types,
+            local_dsl_types,
+            data_allocator,
+            state_fields,
+            structs,
+            function_signatures,
+        )?;
+
+        let struct_name = match base_type {
+            DslType::Custom(name) => name,
+            _ => {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: format!("attribute on non-struct {base_type:?}"),
+                })
+            }
+        };
+
+        let struct_def = structs.get(&struct_name).ok_or_else(|| {
+            ManifestCompileError::UnsupportedType {
+                module: module.to_string(),
+                ty: struct_name.clone(),
+            }
+        })?;
+
+        let (field_ty, field_ptr) =
+            resolve_struct_field_expr(module, base_expr, struct_def, attribute)?;
+
+        let value_expr = match field_ty {
+            DslType::Uint { .. } | DslType::Int { .. } => load_i64(field_ptr),
+            DslType::Bool => IrExpr::LoadI8 {
+                address: Box::new(field_ptr),
+            },
+            _ if is_pointer_type(&field_ty) => field_ptr,
+            _ => {
+                return Err(ManifestCompileError::UnsupportedType {
+                    module: module.to_string(),
+                    ty: field_ty.to_string(),
+                })
+            }
+        };
+
+        return Ok((value_expr, field_ty));
+    }
+
+    if let DslExpr::Index { target, index } = expr {
+        let map_name = match target.as_ref() {
+            DslExpr::Identifier(name) => name,
+            _ => {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: format!("index target {target:?}"),
+                })
+            }
+        };
+
+        let dsl_type = lookup_dsl_type(map_name, param_dsl_types, local_dsl_types, state_fields)
+            .ok_or_else(|| ManifestCompileError::UnknownIdentifier {
+                module: module.to_string(),
+                identifier: map_name.clone(),
+            })?;
+
+        let value_type = match dsl_type {
+            DslType::Map { key: _, value } => (*value).clone(),
+            _ => {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: format!("index on non-map {dsl_type:?}"),
+                })
+            }
+        };
+
+        let (stmts, value_expr) = lower_map_get_expr(
+            module,
+            map_name,
+            index,
+            &value_type,
+            params,
+            locals,
+            param_dsl_types,
+            local_dsl_types,
+            &mut Vec::new(),
+            params.len(),
+            data_allocator,
+            state_fields,
+            function_signatures,
+            structs,
+        )?;
+
+        if !stmts.is_empty() {
+            return Err(ManifestCompileError::UnsupportedExpression {
+                module: module.to_string(),
+                expression: "map index produced side effects".to_string(),
+            });
+        }
+
+        return Ok((value_expr, value_type));
     }
 
     let name = match expr {
@@ -3624,6 +4963,8 @@ fn lower_attribute_call(
         local_dsl_types,
         data_allocator,
         state_fields,
+        structs,
+        function_signatures,
     )?;
 
     if let DslType::Map { key: _, value } = base_type {
@@ -3725,33 +5066,64 @@ fn lower_attribute_call(
 
                 let found_value = map_value_from_ptr(module, &value, call)?;
                 let default_value = if let Some(default_expr) = default_expr {
-                    let lowered = lower_expr(
-                        module,
-                        "map_default",
-                        &default_expr,
-                        params,
-                        locals,
-                        param_dsl_types,
-                        local_dsl_types,
-                        data_allocator,
-                        state_fields,
-                        structs,
-                        function_signatures,
-                    )?;
-                    if lowered.value_type() != found_value.value_type() {
-                        return Err(ManifestCompileError::TypeMismatch {
-                            module: module.to_string(),
-                            expected: found_value.value_type(),
-                            found: lowered.value_type(),
-                        });
+                    if is_pointer_type(&value) {
+                        let (default_stmts, default_ptr, _default_len) = lower_value_buffer(
+                            module,
+                            &default_expr,
+                            params,
+                            locals,
+                            param_dsl_types,
+                            local_dsl_types,
+                            &mut Vec::new(),
+                            params.len(),
+                            data_allocator,
+                            state_fields,
+                            function_signatures,
+                            structs,
+                        )?;
+                        if !default_stmts.is_empty() {
+                            return Err(ManifestCompileError::UnsupportedExpression {
+                                module: module.to_string(),
+                                expression: "map.get default produced side effects".to_string(),
+                            });
+                        }
+                        if default_ptr.value_type() != found_value.value_type() {
+                            return Err(ManifestCompileError::TypeMismatch {
+                                module: module.to_string(),
+                                expected: found_value.value_type(),
+                                found: default_ptr.value_type(),
+                            });
+                        }
+                        default_ptr
+                    } else {
+                        let lowered = lower_expr(
+                            module,
+                            "map_default",
+                            &default_expr,
+                            params,
+                            locals,
+                            param_dsl_types,
+                            local_dsl_types,
+                            data_allocator,
+                            state_fields,
+                            structs,
+                            function_signatures,
+                        )?;
+                        if lowered.value_type() != found_value.value_type() {
+                            return Err(ManifestCompileError::TypeMismatch {
+                                module: module.to_string(),
+                                expected: found_value.value_type(),
+                                found: lowered.value_type(),
+                            });
+                        }
+                        if let IrExpr::HostCall { .. } = lowered {
+                            return Err(ManifestCompileError::UnsupportedExpression {
+                                module: module.to_string(),
+                                expression: "map.get default produced side effects".to_string(),
+                            });
+                        }
+                        lowered
                     }
-                    if let IrExpr::HostCall { .. } = lowered {
-                        return Err(ManifestCompileError::UnsupportedExpression {
-                            module: module.to_string(),
-                            expression: "map.get default produced side effects".to_string(),
-                        });
-                    }
-                    lowered
                 } else {
                     match value.as_ref() {
                         DslType::Uint { .. } | DslType::Int { .. } => IrExpr::ConstI64(0),
@@ -3943,6 +5315,164 @@ fn lower_attribute_call_with_side_effects(
     structs: &HashMap<String, DslStruct>,
     function_signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    if attribute == "append" {
+        let positional = call_args_to_positional(module, args)?;
+        if positional.len() != 1 {
+            return Err(ManifestCompileError::UnsupportedExpression {
+                module: module.to_string(),
+                expression: "append expects one value".to_string(),
+            });
+        }
+
+        if let DslExpr::Attribute { target: struct_target, attribute: field_name } = target {
+            let (struct_expr, struct_type) = resolve_value_expr(
+                module,
+                struct_target,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                data_allocator,
+                state_fields,
+                structs,
+                function_signatures,
+            )?;
+
+            let struct_name = match struct_type {
+                DslType::Custom(name) => name,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("append target is not a struct {struct_type:?}"),
+                    })
+                }
+            };
+
+            let struct_def = structs.get(&struct_name).ok_or_else(|| {
+                ManifestCompileError::UnsupportedType {
+                    module: module.to_string(),
+                    ty: struct_name.clone(),
+                }
+            })?;
+
+            let (field_ty, field_ptr) =
+                resolve_struct_field_expr(module, struct_expr.clone(), struct_def, field_name)?;
+            let element_type = match field_ty {
+                DslType::List(inner) => *inner,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("append on non-list {field_ty:?}"),
+                    })
+                }
+            };
+
+            let (mut stmts, new_list_ptr, new_list_len) = lower_list_append_buffer(
+                module,
+                field_ptr,
+                &positional[0],
+                &element_type,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                params_len,
+                data_allocator,
+                state_fields,
+                function_signatures,
+                structs,
+            )?;
+
+            let (mut rebuild_stmts, new_struct_ptr) = lower_struct_rebuild_with_field_override(
+                struct_expr,
+                struct_def,
+                field_name,
+                new_list_ptr,
+                new_list_len,
+                local_defs,
+                params_len,
+            )?;
+            stmts.append(&mut rebuild_stmts);
+
+            let base_name = match struct_target.as_ref() {
+                DslExpr::Identifier(name) => name,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: "append target must be a local struct".to_string(),
+                    })
+                }
+            };
+            let (local_idx, _) = locals.get(base_name).copied().ok_or_else(|| {
+                ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: "append target must be a local struct".to_string(),
+                }
+            })?;
+            stmts.push(IrStmt::Assign {
+                local: local_idx,
+                value: new_struct_ptr,
+            });
+
+            return Ok((stmts, IrExpr::ConstI32(0)));
+        }
+
+        if let DslExpr::Identifier(list_name) = target {
+            let list_type = lookup_dsl_type(list_name, param_dsl_types, local_dsl_types, state_fields)
+                .ok_or_else(|| ManifestCompileError::UnknownIdentifier {
+                    module: module.to_string(),
+                    identifier: list_name.clone(),
+                })?;
+            let element_type = match list_type {
+                DslType::List(inner) => *inner,
+                _ => {
+                    return Err(ManifestCompileError::UnsupportedExpression {
+                        module: module.to_string(),
+                        expression: format!("append on non-list {list_type:?}"),
+                    })
+                }
+            };
+            let (list_idx, list_ty) = locals.get(list_name).copied().ok_or_else(|| {
+                ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: "append target must be a local list".to_string(),
+                }
+            })?;
+            if list_ty != ValueType::I32 {
+                return Err(ManifestCompileError::UnsupportedExpression {
+                    module: module.to_string(),
+                    expression: "append target must be list pointer".to_string(),
+                });
+            }
+
+            let (mut stmts, new_list_ptr, _new_list_len) = lower_list_append_buffer(
+                module,
+                IrExpr::Local {
+                    index: list_idx,
+                    ty: ValueType::I32,
+                },
+                &positional[0],
+                &element_type,
+                params,
+                locals,
+                param_dsl_types,
+                local_dsl_types,
+                local_defs,
+                params_len,
+                data_allocator,
+                state_fields,
+                function_signatures,
+                structs,
+            )?;
+            stmts.push(IrStmt::Assign {
+                local: list_idx,
+                value: new_list_ptr,
+            });
+            return Ok((stmts, IrExpr::ConstI32(0)));
+        }
+    }
+
     let (base_expr, base_type) = resolve_value_expr(
         module,
         target,
@@ -3952,7 +5482,26 @@ fn lower_attribute_call_with_side_effects(
         local_dsl_types,
         data_allocator,
         state_fields,
+        structs,
+        function_signatures,
     )?;
+
+    if attribute == "to_hex" {
+        if !args.is_empty() {
+            return Err(ManifestCompileError::UnsupportedExpression {
+                module: module.to_string(),
+                expression: "to_hex takes no args".to_string(),
+            });
+        }
+        if !matches!(base_type, DslType::Bytes) {
+            return Err(ManifestCompileError::UnsupportedExpression {
+                module: module.to_string(),
+                expression: "to_hex target must be bytes".to_string(),
+            });
+        }
+        let (stmts, ptr) = lower_bytes_to_hex_buffer(base_expr, local_defs, params_len)?;
+        return Ok((stmts, ptr));
+    }
 
     if let DslType::Map { key: _, value } = base_type {
         let map_name = match target {
@@ -4047,30 +5596,56 @@ fn lower_attribute_call_with_side_effects(
 
                 let found_value = map_value_from_ptr(module, &value, call)?;
                 let default_value = if let Some(default_expr) = default_expr {
-                    let (mut default_stmts, lowered, _) = lower_expr_with_side_effects(
-                        module,
-                        "map_default",
-                        &default_expr,
-                        None,
-                        params,
-                        locals,
-                        param_dsl_types,
-                        local_dsl_types,
-                        local_defs,
-                        data_allocator,
-                        state_fields,
-                        structs,
-                        function_signatures,
-                    )?;
-                    if lowered.value_type() != found_value.value_type() {
-                        return Err(ManifestCompileError::TypeMismatch {
-                            module: module.to_string(),
-                            expected: found_value.value_type(),
-                            found: lowered.value_type(),
-                        });
+                    if is_pointer_type(&value) {
+                        let (mut default_stmts, default_ptr, _default_len) = lower_value_buffer(
+                            module,
+                            &default_expr,
+                            params,
+                            locals,
+                            param_dsl_types,
+                            local_dsl_types,
+                            local_defs,
+                            params_len,
+                            data_allocator,
+                            state_fields,
+                            function_signatures,
+                            structs,
+                        )?;
+                        if default_ptr.value_type() != found_value.value_type() {
+                            return Err(ManifestCompileError::TypeMismatch {
+                                module: module.to_string(),
+                                expected: found_value.value_type(),
+                                found: default_ptr.value_type(),
+                            });
+                        }
+                        stmts.append(&mut default_stmts);
+                        default_ptr
+                    } else {
+                        let (mut default_stmts, lowered, _) = lower_expr_with_side_effects(
+                            module,
+                            "map_default",
+                            &default_expr,
+                            None,
+                            params,
+                            locals,
+                            param_dsl_types,
+                            local_dsl_types,
+                            local_defs,
+                            data_allocator,
+                            state_fields,
+                            structs,
+                            function_signatures,
+                        )?;
+                        if lowered.value_type() != found_value.value_type() {
+                            return Err(ManifestCompileError::TypeMismatch {
+                                module: module.to_string(),
+                                expected: found_value.value_type(),
+                                found: lowered.value_type(),
+                            });
+                        }
+                        stmts.append(&mut default_stmts);
+                        lowered
                     }
-                    stmts.append(&mut default_stmts);
-                    lowered
                 } else {
                     match value.as_ref() {
                         DslType::Uint { .. } | DslType::Int { .. } => IrExpr::ConstI64(0),
@@ -4308,12 +5883,20 @@ fn map_value_from_ptr(
     }
 }
 
-fn lower_state_read(
+fn lower_state_read_dynamic(
     module: &str,
     args: &[DslCallArg],
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
     data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
     structs: &HashMap<String, DslStruct>,
-) -> Result<IrExpr, ManifestCompileError> {
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
     let args = call_args_to_positional(module, args)?;
     if args.len() != 1 {
         return Err(ManifestCompileError::UnsupportedExpression {
@@ -4322,16 +5905,449 @@ fn lower_state_read(
         });
     }
 
-    let key_bytes = literal_to_bytes(module, &args[0], structs)?;
-    let key_ptr = data_allocator.allocate(key_bytes.clone());
+    let (mut stmts, key_ptr, key_len) = lower_value_buffer(
+        module,
+        &args[0],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
     let out_len_ptr = data_allocator.allocate(vec![0, 0, 0, 0]);
+    let state_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__state_ptr");
+    stmts.push(IrStmt::Let {
+        local: state_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::StdStateRead,
+            args: vec![key_ptr, key_len, IrExpr::ConstI32(out_len_ptr as i32)],
+        },
+    });
 
-    Ok(IrExpr::StateRead {
-        key_ptr,
-        key_len: key_bytes.len() as u32,
-        out_len_ptr,
-        ty: ValueType::I64,
-    })
+    let state_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__state_len");
+    stmts.push(IrStmt::Let {
+        local: state_len_idx,
+        value: load_i32(IrExpr::ConstI32(out_len_ptr as i32)),
+    });
+
+    let out_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__state_opt_ptr");
+    stmts.push(IrStmt::Let {
+        local: out_ptr_idx,
+        value: IrExpr::ConstI32(0),
+    });
+
+    let present_cond = IrExpr::Binary {
+        op: IrBinaryOp::NotEqual,
+        left: Box::new(IrExpr::Local {
+            index: state_ptr_idx,
+            ty: ValueType::I32,
+        }),
+        right: Box::new(IrExpr::ConstI32(0)),
+        ty: ValueType::I32,
+    };
+
+    let total_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__state_opt_len");
+    let mut then_body = Vec::new();
+    then_body.push(IrStmt::Let {
+        local: total_len_idx,
+        value: add_i32(
+            add_i32(
+                IrExpr::Local {
+                    index: state_len_idx,
+                    ty: ValueType::I32,
+                },
+                IrExpr::ConstI32(4),
+            ),
+            IrExpr::ConstI32(1),
+        ),
+    });
+    then_body.push(IrStmt::Assign {
+        local: out_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::Local {
+                index: total_len_idx,
+                ty: ValueType::I32,
+            }],
+        },
+    });
+    then_body.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::ConstI32(1),
+        width: StoreWidth::I8,
+    });
+    then_body.push(IrStmt::Store {
+        address: add_i32(
+            IrExpr::Local {
+                index: out_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(1),
+        ),
+        value: IrExpr::Local {
+            index: state_len_idx,
+            ty: ValueType::I32,
+        },
+        width: StoreWidth::I32,
+    });
+    let copy_stmts = emit_copy_bytes(
+        params_len,
+        local_defs,
+        IrExpr::Local {
+            index: state_ptr_idx,
+            ty: ValueType::I32,
+        },
+        add_i32(
+            IrExpr::Local {
+                index: out_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(5),
+        ),
+        IrExpr::Local {
+            index: state_len_idx,
+            ty: ValueType::I32,
+        },
+    );
+    then_body.extend(copy_stmts);
+
+    let mut else_body = Vec::new();
+    else_body.push(IrStmt::Assign {
+        local: out_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::ConstI32(1)],
+        },
+    });
+    else_body.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::ConstI32(0),
+        width: StoreWidth::I8,
+    });
+
+    stmts.push(IrStmt::If {
+        condition: present_cond,
+        then_body,
+        else_body,
+    });
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+    ))
+}
+
+fn lower_std_require_role_expr(
+    module: &str,
+    args: &[DslCallArg],
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let positional = call_args_to_positional(module, args)?;
+    if positional.len() != 2 {
+        return Err(ManifestCompileError::UnsupportedExpression {
+            module: module.to_string(),
+            expression: "require_role expects ctx and role".to_string(),
+        });
+    }
+
+    let (mut stmts, ctx_ptr, ctx_len) = lower_value_buffer(
+        module,
+        &positional[0],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+    let (mut role_stmts, role_ptr, role_len) = lower_value_buffer(
+        module,
+        &positional[1],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+    stmts.append(&mut role_stmts);
+
+    let expr = IrExpr::HostCall {
+        function: crate::ir::HostFunction::StdRequireRole,
+        args: vec![ctx_ptr, ctx_len, role_ptr, role_len],
+    };
+
+    Ok((stmts, expr))
+}
+
+fn lower_std_timestamp_expr(
+    module: &str,
+    args: &[DslCallArg],
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let positional = call_args_to_positional(module, args)?;
+    if positional.len() != 1 {
+        return Err(ManifestCompileError::UnsupportedExpression {
+            module: module.to_string(),
+            expression: "timestamp expects ctx".to_string(),
+        });
+    }
+
+    let (stmts, ctx_ptr, ctx_len) = lower_value_buffer(
+        module,
+        &positional[0],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+
+    let expr = IrExpr::HostCall {
+        function: crate::ir::HostFunction::StdTimestamp,
+        args: vec![ctx_ptr, ctx_len],
+    };
+
+    Ok((stmts, expr))
+}
+
+fn lower_std_emit_stmt(
+    module: &str,
+    args: &[DslCallArg],
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<Vec<IrStmt>, ManifestCompileError> {
+    let positional = call_args_to_positional(module, args)?;
+    if positional.len() != 3 {
+        return Err(ManifestCompileError::UnsupportedExpression {
+            module: module.to_string(),
+            expression: "emit expects ctx, name, payload".to_string(),
+        });
+    }
+
+    let (mut stmts, ctx_ptr, ctx_len) = lower_value_buffer(
+        module,
+        &positional[0],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+
+    let event_expr = DslExpr::MapLiteral(vec![
+        (
+            DslExpr::Literal(DslLiteral::String("name".to_string())),
+            positional[1].clone(),
+        ),
+        (
+            DslExpr::Literal(DslLiteral::String("payload".to_string())),
+            positional[2].clone(),
+        ),
+    ]);
+    let (mut event_stmts, event_ptr, event_len) = lower_map_literal_buffer(
+        module,
+        match &event_expr {
+            DslExpr::MapLiteral(entries) => entries,
+            _ => unreachable!(),
+        },
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+    stmts.append(&mut event_stmts);
+
+    stmts.push(IrStmt::Expr(IrExpr::HostCall {
+        function: crate::ir::HostFunction::StdEmit,
+        args: vec![ctx_ptr, ctx_len, event_ptr, event_len],
+    }));
+
+    Ok(stmts)
+}
+
+fn lower_std_sha256_expr(
+    module: &str,
+    args: &[DslCallArg],
+    params: &HashMap<String, (u32, ValueType)>,
+    locals: &HashMap<String, (u32, ValueType)>,
+    param_dsl_types: &HashMap<String, DslType>,
+    local_dsl_types: &HashMap<String, DslType>,
+    local_defs: &mut Vec<IrLocal>,
+    params_len: usize,
+    data_allocator: &mut DataAllocator,
+    state_fields: &HashMap<String, DslType>,
+    function_signatures: &HashMap<String, FunctionSignature>,
+    structs: &HashMap<String, DslStruct>,
+) -> Result<(Vec<IrStmt>, IrExpr), ManifestCompileError> {
+    let positional = call_args_to_positional(module, args)?;
+    if positional.len() != 1 {
+        return Err(ManifestCompileError::UnsupportedExpression {
+            module: module.to_string(),
+            expression: "sha256 expects one argument".to_string(),
+        });
+    }
+
+    let (mut stmts, payload_ptr, payload_len) = lower_value_buffer(
+        module,
+        &positional[0],
+        params,
+        locals,
+        param_dsl_types,
+        local_dsl_types,
+        local_defs,
+        params_len,
+        data_allocator,
+        state_fields,
+        function_signatures,
+        structs,
+    )?;
+
+    let out_len_ptr = data_allocator.allocate(vec![0, 0, 0, 0]);
+    let hash_ptr_expr = IrExpr::HostCall {
+        function: crate::ir::HostFunction::StdCryptoSha256,
+        args: vec![payload_ptr, payload_len, IrExpr::ConstI32(out_len_ptr as i32)],
+    };
+
+    let hash_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__sha256_ptr");
+    stmts.push(IrStmt::Let {
+        local: hash_ptr_idx,
+        value: hash_ptr_expr,
+    });
+    let hash_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__sha256_len");
+    stmts.push(IrStmt::Let {
+        local: hash_len_idx,
+        value: load_i32(IrExpr::ConstI32(out_len_ptr as i32)),
+    });
+
+    let total_len_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__sha256_total");
+    stmts.push(IrStmt::Let {
+        local: total_len_idx,
+        value: add_i32(
+            IrExpr::Local {
+                index: hash_len_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+    });
+
+    let out_ptr_idx = add_temp_local(local_defs, params_len, ValueType::I32, "__sha256_out");
+    stmts.push(IrStmt::Let {
+        local: out_ptr_idx,
+        value: IrExpr::HostCall {
+            function: crate::ir::HostFunction::MemoryDeterministicMalloc,
+            args: vec![IrExpr::Local {
+                index: total_len_idx,
+                ty: ValueType::I32,
+            }],
+        },
+    });
+
+    stmts.push(IrStmt::Store {
+        address: IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+        value: IrExpr::Local {
+            index: hash_len_idx,
+            ty: ValueType::I32,
+        },
+        width: StoreWidth::I32,
+    });
+
+    let copy_stmts = emit_copy_bytes(
+        params_len,
+        local_defs,
+        IrExpr::Local {
+            index: hash_ptr_idx,
+            ty: ValueType::I32,
+        },
+        add_i32(
+            IrExpr::Local {
+                index: out_ptr_idx,
+                ty: ValueType::I32,
+            },
+            IrExpr::ConstI32(4),
+        ),
+        IrExpr::Local {
+            index: hash_len_idx,
+            ty: ValueType::I32,
+        },
+    );
+    stmts.extend(copy_stmts);
+
+    Ok((
+        stmts,
+        IrExpr::Local {
+            index: out_ptr_idx,
+            ty: ValueType::I32,
+        },
+    ))
 }
 
 fn lower_map_get_expr(
@@ -4702,10 +6718,8 @@ fn lower_value_buffer(
                 return Ok((stmts, value_expr, len_expr));
             }
             DslType::Map { .. } => {
-                return Err(ManifestCompileError::UnsupportedExpression {
-                    module: module.to_string(),
-                    expression: format!("non-literal map value {expr:?}"),
-                })
+                let len_expr = length_prefixed_len_expr(value_expr.clone());
+                return Ok((stmts, value_expr, len_expr));
             }
             _ => {}
         }

@@ -42,6 +42,8 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
         collect_contract_functions(contract, &mut bindings);
     }
 
+    validate_entry_abi_signature(&bindings);
+
     if bindings.is_empty() {
         return wasm.finish();
     }
@@ -162,6 +164,48 @@ pub fn emit_wasm(ir_module: &IrModule) -> Vec<u8> {
     }
 
     wasm.finish()
+}
+
+fn validate_entry_abi_signature(bindings: &[FunctionBinding]) {
+    let entry = bindings
+        .iter()
+        .find(|binding| binding.function.name == abi::LEGACY_ENTRY_EXPORT);
+    let Some(entry) = entry else {
+        return;
+    };
+
+    let expected_params: Vec<ValueType> = abi::ENTRY_PARAM_TYPES
+        .iter()
+        .map(map_entry_param_type)
+        .collect();
+    let actual_params: Vec<ValueType> = entry
+        .function
+        .params
+        .iter()
+        .map(|param| param.ty)
+        .collect();
+
+    if actual_params != expected_params {
+        panic!(
+            "entry ABI mismatch: expected params {:?}, got {:?}",
+            expected_params, actual_params
+        );
+    }
+
+    let expected_return = map_entry_param_type(&abi::ENTRY_RETURN_TYPE);
+    if entry.function.return_type != Some(expected_return) {
+        panic!(
+            "entry ABI mismatch: expected return {:?}, got {:?}",
+            expected_return, entry.function.return_type
+        );
+    }
+}
+
+fn map_entry_param_type(param: &abi::EntryParamType) -> ValueType {
+    match param {
+        abi::EntryParamType::I32 => ValueType::I32,
+        abi::EntryParamType::I64 => ValueType::I64,
+    }
 }
 
 fn collect_contract_functions(contract: &Contract, output: &mut Vec<FunctionBinding>) {
