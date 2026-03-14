@@ -304,24 +304,45 @@ pub fn compile_manifest_to_ir(path: &Path) -> Result<IrModule, ManifestCompileEr
         .clone()
         .unwrap_or_else(|| manifest.contract.clone());
 
-    let mut functions = Vec::new();
+    let mut contract_functions = Vec::new();
     for module in &manifest.modules {
         let module_functions = module_functions.get(&module.name).ok_or_else(|| {
             ManifestCompileError::MissingModule {
                 module: module.name.clone(),
             }
         })?;
-        functions.extend(module_functions.iter().cloned());
+        contract_functions.extend(module_functions.iter().cloned());
     }
+
+    // Synthesize the 9-arg entry expected by the runtime so the resulting Wasm
+    // exports both `main` (legacy) and `axiom_entry_main` for plan validation.
+    let entry_function = IrFunction {
+        name: axiom_runtime::abi::LEGACY_ENTRY_EXPORT.to_string(),
+        params: vec![
+            IrParam { name: "sender".to_string(), ty: ValueType::I32 },
+            IrParam { name: "recipient".to_string(), ty: ValueType::I32 },
+            IrParam { name: "amount".to_string(), ty: ValueType::I64 },
+            IrParam { name: "timestamp".to_string(), ty: ValueType::I64 },
+            IrParam { name: "metadata".to_string(), ty: ValueType::I32 },
+            IrParam { name: "nonce".to_string(), ty: ValueType::I64 },
+            IrParam { name: "signature".to_string(), ty: ValueType::I32 },
+            IrParam { name: "sender_pubkey".to_string(), ty: ValueType::I32 },
+            IrParam { name: "memo".to_string(), ty: ValueType::I32 },
+        ],
+        return_type: Some(ValueType::I64),
+        body: IrFunctionBody::Return {
+            value: Some(IrExpr::ConstI64(0)),
+        },
+    };
 
     Ok(IrModule {
         contracts: vec![IrContract {
             name: contract_name,
             params: Vec::new(),
             storage: Vec::new(),
-            functions,
+            functions: contract_functions,
         }],
-        functions: Vec::new(),
+        functions: vec![entry_function],
         data_segments: data_allocator.finish(),
     })
 }
