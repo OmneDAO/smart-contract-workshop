@@ -1,0 +1,23 @@
+module: aemula_subscription
+
+state:
+    subscriptions: map<address, uint128>
+
+functions:
+fn subscribe(subscriber: address, duration_secs: uint128, current_time: uint128) -> uint128:
+    let existing_expiry: uint128 = subscriptions[subscriber]
+    let base_time: uint128 = current_time
+    if existing_expiry > current_time:
+        base_time = existing_expiry
+    let new_expiry: uint128 = base_time + duration_secs
+    subscriptions[subscriber] = new_expiry
+    return new_expiry
+
+fn is_active(subscriber: address, current_time: uint128) -> uint128:
+    let expiry: uint128 = subscriptions[subscriber]
+    if expiry > current_time:
+        return expiry
+    return 0
+
+fn get_expiry(subscriber: address) -> uint128:
+    return subscriptions[subscriber]
