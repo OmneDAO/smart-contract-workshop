@@ -1,0 +1,12 @@
+contract: aemula_subscription
+version: 0.1.0
+modules:
+  - name: aemula_subscription
+    path: ../examples/aemula_subscription.pysub
+entrypoints:
+  - module: aemula_subscription
+    name: subscribe
+  - module: aemula_subscription
+    name: is_active
+  - module: aemula_subscription
+    name: get_expiry
