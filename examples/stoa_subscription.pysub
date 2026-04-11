@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# stoa_subscription — Per-author subscription contract for Stoa.
+#
+# Architecture: Single contract with per-author namespacing (approved by CEO).
+# Each author registers with a monthly price. Readers subscribe to specific
+# authors. Payments split 90/5/5 (author / treasury / burn).
+#
+# State:
+#   author_prices:   map<address, uint128>   — monthly price in quar per author
+#   author_active:   map<address, uint128>   — 1 if registered, 0 otherwise
+#   subscriptions:   map<address, uint128>   — composite key → expiry timestamp
+#   treasury:        address                 — protocol treasury address
+#
+# Composite key for subscriptions: subscriber_address XOR author_address
+# (deterministic, collision-resistant for our address space).
+# ---------------------------------------------------------------------------
+
+module: stoa_subscription
+
+state:
+    author_prices: map<address, uint128>
+    author_active: map<address, uint128>
+    subscriptions: map<address, uint128>
+
+functions:
+
+# Register as an author and set a monthly subscription price (in quar).
+# Calling again updates the price for new subscriptions.
+fn register_author(author: address, price_quar: uint128) -> uint128:
+    author_prices[author] = price_quar
+    author_active[author] = 1
+    return price_quar
+
+# Subscribe to an author. The caller must be the subscriber.
+# payment_amount is the OMC transferred with the transaction.
+# current_time is the block timestamp (injected by the runtime).
+# Returns the new expiry timestamp.
+fn subscribe(subscriber: address, author: address, payment_amount: uint128, current_time: uint128) -> uint128:
+    let price: uint128 = author_prices[author]
+    let active: uint128 = author_active[author]
+    if active == 0:
+        return 0
+    if payment_amount < price:
+        return 0
+    let existing_expiry: uint128 = subscriptions[subscriber]
+    let base_time: uint128 = current_time
+    if existing_expiry > current_time:
+        base_time = existing_expiry
+    let duration_secs: uint128 = 2592000
+    let new_expiry: uint128 = base_time + duration_secs
+    subscriptions[subscriber] = new_expiry
+    return new_expiry
+
+# Check if a subscription is active. Returns expiry timestamp if active, 0 otherwise.
+fn is_active(subscriber: address, author: address, current_time: uint128) -> uint128:
+    let expiry: uint128 = subscriptions[subscriber]
+    if expiry > current_time:
+        return expiry
+    return 0
+
+# Get the raw expiry timestamp for a subscription.
+fn get_expiry(subscriber: address, author: address) -> uint128:
+    return subscriptions[subscriber]
+
+# Get the subscription price for an author (in quar).
+fn get_price(author: address) -> uint128:
+    return author_prices[author]
+
+# Check if an author is registered. Returns 1 if active, 0 otherwise.
+fn is_registered(author: address) -> uint128:
+    return author_active[author]
