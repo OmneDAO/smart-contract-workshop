@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# stoa_subscription test manifest — defines entrypoints for the compiler.
+# ---------------------------------------------------------------------------
+
+contract: stoa_subscription
+version: 0.1.0
+modules:
+  - name: stoa_subscription
+    path: ../examples/stoa_subscription.pysub
+entrypoints:
+  - module: stoa_subscription
+    name: register_author
+  - module: stoa_subscription
+    name: subscribe
+  - module: stoa_subscription
+    name: is_active
+  - module: stoa_subscription
+    name: get_expiry
+  - module: stoa_subscription
+    name: get_price
+  - module: stoa_subscription
+    name: is_registered
