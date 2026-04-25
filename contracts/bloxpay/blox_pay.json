@@ -1,0 +1,332 @@
+{
+  "metadata": {
+    "metadata_version": "1.0",
+    "compiler_version": "0.1.0",
+    "generated_at": "2026-04-25T13:44:46.631968+00:00",
+    "source_path": "blox_pay.yml",
+    "wasm_sha256": "38b5a0e4725445dc4877f08648e11d8cc3bb0f46c7b9710807109d9f520e48f6",
+    "wasm_size_bytes": 4553,
+    "contracts": [
+      {
+        "name": "blox_pay",
+        "params": [],
+        "storage": [],
+        "methods": [
+          {
+            "name": "create_intent",
+            "selector": "blox_pay::create_intent",
+            "export": "axiom_contract::blox_pay::create_intent",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "merchant",
+                "ty": "i32"
+              },
+              {
+                "name": "amount_quar",
+                "ty": "i64"
+              },
+              {
+                "name": "escrow_addr",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "mark_escrowed",
+            "selector": "blox_pay::mark_escrowed",
+            "export": "axiom_contract::blox_pay::mark_escrowed",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "payer",
+                "ty": "i32"
+              },
+              {
+                "name": "paid_amount",
+                "ty": "i64"
+              },
+              {
+                "name": "release_after",
+                "ty": "i64"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "release_to_merchant",
+            "selector": "blox_pay::release_to_merchant",
+            "export": "axiom_contract::blox_pay::release_to_merchant",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "refund_to_customer",
+            "selector": "blox_pay::refund_to_customer",
+            "export": "axiom_contract::blox_pay::refund_to_customer",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "mark_disputed",
+            "selector": "blox_pay::mark_disputed",
+            "export": "axiom_contract::blox_pay::mark_disputed",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "void_intent",
+            "selector": "blox_pay::void_intent",
+            "export": "axiom_contract::blox_pay::void_intent",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_status",
+            "selector": "blox_pay::get_status",
+            "export": "axiom_contract::blox_pay::get_status",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_merchant",
+            "selector": "blox_pay::get_merchant",
+            "export": "axiom_contract::blox_pay::get_merchant",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_amount",
+            "selector": "blox_pay::get_amount",
+            "export": "axiom_contract::blox_pay::get_amount",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_escrow_addr",
+            "selector": "blox_pay::get_escrow_addr",
+            "export": "axiom_contract::blox_pay::get_escrow_addr",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_payer",
+            "selector": "blox_pay::get_payer",
+            "export": "axiom_contract::blox_pay::get_payer",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_paid_amount",
+            "selector": "blox_pay::get_paid_amount",
+            "export": "axiom_contract::blox_pay::get_paid_amount",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_release_after",
+            "selector": "blox_pay::get_release_after",
+            "export": "axiom_contract::blox_pay::get_release_after",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_created_at",
+            "selector": "blox_pay::get_created_at",
+            "export": "axiom_contract::blox_pay::get_created_at",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_paid_at",
+            "selector": "blox_pay::get_paid_at",
+            "export": "axiom_contract::blox_pay::get_paid_at",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_settled_at",
+            "selector": "blox_pay::get_settled_at",
+            "export": "axiom_contract::blox_pay::get_settled_at",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_refunded_at",
+            "selector": "blox_pay::get_refunded_at",
+            "export": "axiom_contract::blox_pay::get_refunded_at",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_disputed_at",
+            "selector": "blox_pay::get_disputed_at",
+            "export": "axiom_contract::blox_pay::get_disputed_at",
+            "params": [
+              {
+                "name": "link_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          }
+        ]
+      }
+    ],
+    "free_functions": [
+      {
+        "name": "main",
+        "export": "main",
+        "params": [
+          {
+            "name": "sender",
+            "ty": "i32"
+          },
+          {
+            "name": "recipient",
+            "ty": "i32"
+          },
+          {
+            "name": "amount",
+            "ty": "i64"
+          },
+          {
+            "name": "timestamp",
+            "ty": "i64"
+          },
+          {
+            "name": "metadata",
+            "ty": "i32"
+          },
+          {
+            "name": "nonce",
+            "ty": "i64"
+          },
+          {
+            "name": "signature",
+            "ty": "i32"
+          },
+          {
+            "name": "sender_pubkey",
+            "ty": "i32"
+          },
+          {
+            "name": "memo",
+            "ty": "i32"
+          }
+        ],
+        "return_type": "i64"
+      }
+    ],
+    "host_functions": [
+      "std_runtime::map_get",
+      "std_runtime::map_put"
+    ]
+  }
+}
