@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# blox_pay manifest — defines compiler entrypoints for Blox Pay's payment-
+# intent registry + escrow lifecycle contract.
+# ---------------------------------------------------------------------------
+
+contract: blox_pay
+version: 0.2.0
+modules:
+  - name: blox_pay
+    path: blox_pay.pysub
+entrypoints:
+  - module: blox_pay
+    name: create_intent
+  - module: blox_pay
+    name: mark_escrowed
+  - module: blox_pay
+    name: release_to_merchant
+  - module: blox_pay
+    name: refund_to_customer
+  - module: blox_pay
+    name: mark_disputed
+  - module: blox_pay
+    name: void_intent
+  - module: blox_pay
+    name: get_status
+  - module: blox_pay
+    name: get_merchant
+  - module: blox_pay
+    name: get_amount
+  - module: blox_pay
+    name: get_escrow_addr
+  - module: blox_pay
+    name: get_payer
+  - module: blox_pay
+    name: get_paid_amount
+  - module: blox_pay
+    name: get_release_after
+  - module: blox_pay
+    name: get_created_at
+  - module: blox_pay
+    name: get_paid_at
+  - module: blox_pay
+    name: get_settled_at
+  - module: blox_pay
+    name: get_refunded_at
+  - module: blox_pay
+    name: get_disputed_at

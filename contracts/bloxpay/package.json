@@ -1,0 +1,1 @@
+{ "name": "bloxpay-deploy", "type": "module", "private": true, "dependencies": { "@omne/sdk": "^1.1.0" } }

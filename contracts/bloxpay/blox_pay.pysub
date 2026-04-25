@@ -1,0 +1,188 @@
+# ---------------------------------------------------------------------------
+# blox_pay — Payment-intent registry + escrow lifecycle for Blox Pay's hosted
+# checkout product on the Omne L1.
+#
+# Architectural shape: this contract is the on-chain state machine for a
+# customer→escrow→merchant payment lifecycle. The contract itself does NOT
+# hold or move OMC (FastVM does not yet expose a `transfer` host fn); native
+# OMC moves peer-to-peer via omne_sendTransaction in three legs:
+#   1. customer  → escrow_addr     (customer pays)
+#   2. escrow    → merchant        (release after hold window OR confirmation)
+#   3. escrow    → customer        (refund path during hold window)
+#
+# The contract records the canonical state of each leg + enforces the legal
+# transitions. Off-chain orchestration (Blox backend) signs the value-moving
+# txs and calls into the contract to record the new state. All transitions
+# are publicly verifiable on-chain.
+#
+# Trust model (v1):
+#   - Contract calls (create_intent, mark_*, release_to_merchant,
+#     refund_to_customer, mark_disputed, void_intent) are open in v1; the
+#     backend is the only practical caller. v2 will gate them by caller
+#     identity once a require_role / signed-action pattern is wired in.
+#   - The release window (release_after) is a per-intent hard floor.
+#     `release_to_merchant` REJECTS when current_time < release_after.
+#     This is the protocol-level guarantee that the customer has a hold
+#     window to dispute — even Blox cannot release early.
+#   - `refund_to_customer` and `mark_disputed` are unrestricted during
+#     escrowed state. v2 will require a Blox-side signed approval.
+#
+# State key model: link_id is a 20-byte address derived as
+#   SHA-256(canonical_link_uuid)[0..20] — keyed across maps.
+#
+# Status enum:
+#   0 = not_created (default for unset map slot)
+#   1 = pending     (intent created; awaiting customer payment)
+#   2 = escrowed    (customer paid; OMC held in Blox escrow)
+#   3 = settled     (released to merchant; terminal)
+#   4 = refunded    (returned to customer; terminal)
+#   5 = disputed    (under arbitration; auto-release halted)
+#   6 = voided      (canceled before payment; terminal)
+# ---------------------------------------------------------------------------
+
+module: blox_pay
+
+state:
+    intent_merchant: map<address, address>
+    intent_amount: map<address, uint128>
+    intent_status: map<address, uint128>
+    intent_escrow_addr: map<address, address>
+    intent_created_at: map<address, uint128>
+    intent_payer: map<address, address>
+    intent_paid_amount: map<address, uint128>
+    intent_paid_at: map<address, uint128>
+    intent_release_after: map<address, uint128>
+    intent_settled_at: map<address, uint128>
+    intent_refunded_at: map<address, uint128>
+    intent_disputed_at: map<address, uint128>
+
+functions:
+
+# Register a new payment intent in pending state. The escrow_addr is the
+# Blox-controlled account that will receive the customer's OMC and later
+# release it to the merchant.
+# Returns 1 on success, 0 if link_id already has an intent.
+fn create_intent(link_id: address, merchant: address, amount_quar: uint128, escrow_addr: address, current_time: uint128) -> uint128:
+    let existing: uint128 = intent_status[link_id]
+    if existing > 0:
+        return 0
+    intent_merchant[link_id] = merchant
+    intent_amount[link_id] = amount_quar
+    intent_status[link_id] = 1
+    intent_escrow_addr[link_id] = escrow_addr
+    intent_created_at[link_id] = current_time
+    return 1
+
+# Record that a customer's OMC has landed in the escrow address. Caller
+# (Blox backend) is expected to verify the on-chain transfer matches the
+# expected amount and the configured escrow_addr before calling this.
+# release_after is the timestamp (uint128 seconds) when the merchant becomes
+# eligible for auto-release; the contract enforces this floor in
+# release_to_merchant.
+# Returns 1 on success, 0 if intent is not pending or paid_amount is below
+# the expected amount.
+fn mark_escrowed(link_id: address, payer: address, paid_amount: uint128, release_after: uint128, current_time: uint128) -> uint128:
+    let status: uint128 = intent_status[link_id]
+    if status != 1:
+        return 0
+    let expected: uint128 = intent_amount[link_id]
+    if paid_amount < expected:
+        return 0
+    intent_status[link_id] = 2
+    intent_payer[link_id] = payer
+    intent_paid_amount[link_id] = paid_amount
+    intent_paid_at[link_id] = current_time
+    intent_release_after[link_id] = release_after
+    return 1
+
+# Release escrow to merchant. The contract enforces the release_after window
+# at the protocol level — even Blox cannot release before that timestamp.
+# Caller (Blox backend) signs the actual escrow→merchant OMC transfer
+# off-chain after this call returns 1.
+# Returns 1 on success, 0 if intent is not in escrowed state, or if
+# current_time < release_after.
+fn release_to_merchant(link_id: address, current_time: uint128) -> uint128:
+    let status: uint128 = intent_status[link_id]
+    if status != 2:
+        return 0
+    let release_at: uint128 = intent_release_after[link_id]
+    if current_time < release_at:
+        return 0
+    intent_status[link_id] = 3
+    intent_settled_at[link_id] = current_time
+    return 1
+
+# Refund escrowed funds to the customer. Allowed during escrowed or disputed
+# state. Caller (Blox backend) signs the actual escrow→customer OMC transfer
+# off-chain after this call returns 1.
+# Returns 1 on success, 0 if intent is not in a refundable state.
+fn refund_to_customer(link_id: address, current_time: uint128) -> uint128:
+    let status: uint128 = intent_status[link_id]
+    if status == 2:
+        intent_status[link_id] = 4
+        intent_refunded_at[link_id] = current_time
+        return 1
+    if status == 5:
+        intent_status[link_id] = 4
+        intent_refunded_at[link_id] = current_time
+        return 1
+    return 0
+
+# Mark an escrowed intent as disputed. Halts the auto-release window. Future
+# resolution moves it to settled (release_to_merchant) or refunded
+# (refund_to_customer).
+# Returns 1 on success, 0 if intent is not in escrowed state.
+fn mark_disputed(link_id: address, current_time: uint128) -> uint128:
+    let status: uint128 = intent_status[link_id]
+    if status != 2:
+        return 0
+    intent_status[link_id] = 5
+    intent_disputed_at[link_id] = current_time
+    return 1
+
+# Void a pending intent that the customer has not yet paid into escrow.
+# Returns 1 on success, 0 if intent is not in pending state.
+fn void_intent(link_id: address, current_time: uint128) -> uint128:
+    let status: uint128 = intent_status[link_id]
+    if status != 1:
+        return 0
+    intent_status[link_id] = 6
+    return 1
+
+# --- Read-only queries ---------------------------------------------------
+
+fn get_status(link_id: address) -> uint128:
+    return intent_status[link_id]
+
+fn get_merchant(link_id: address) -> address:
+    return intent_merchant[link_id]
+
+fn get_amount(link_id: address) -> uint128:
+    return intent_amount[link_id]
+
+fn get_escrow_addr(link_id: address) -> address:
+    return intent_escrow_addr[link_id]
+
+fn get_payer(link_id: address) -> address:
+    return intent_payer[link_id]
+
+fn get_paid_amount(link_id: address) -> uint128:
+    return intent_paid_amount[link_id]
+
+fn get_release_after(link_id: address) -> uint128:
+    return intent_release_after[link_id]
+
+fn get_created_at(link_id: address) -> uint128:
+    return intent_created_at[link_id]
+
+fn get_paid_at(link_id: address) -> uint128:
+    return intent_paid_at[link_id]
+
+fn get_settled_at(link_id: address) -> uint128:
+    return intent_settled_at[link_id]
+
+fn get_refunded_at(link_id: address) -> uint128:
+    return intent_refunded_at[link_id]
+
+fn get_disputed_at(link_id: address) -> uint128:
+    return intent_disputed_at[link_id]

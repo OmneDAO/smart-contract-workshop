@@ -1,0 +1,271 @@
+{
+  "generated_at_unix": 1765414114,
+  "fixtures": [
+    {
+      "slug": "entry_constant_add",
+      "description": "Pure addition helper",
+      "entry_function": "add",
+      "module_sha256": "0785313c9f189b84a393911372a7d7a149ba2bd7af83730704167186a5e19899",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 10
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 10
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 10
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "entry_constant_main",
+      "description": "Entry function returning a constant",
+      "entry_function": "axiom_entry_main",
+      "module_sha256": "0785313c9f189b84a393911372a7d7a149ba2bd7af83730704167186a5e19899",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 42
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 42
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 42
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "host_helpers_execution_time",
+      "description": "System helper returning execution time",
+      "entry_function": "execution_time",
+      "module_sha256": "9d75cd5f46040bec23f5b0043c3ab2d6fa1b89edec3c261f8cfff72c41878ef8",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "host_helpers_main",
+      "description": "System helper returning gas remaining",
+      "entry_function": "axiom_entry_main",
+      "module_sha256": "9d75cd5f46040bec23f5b0043c3ab2d6fa1b89edec3c261f8cfff72c41878ef8",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 1000000
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 1000000
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 1000000
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "memory_helpers_main",
+      "description": "Entry returns constant placeholder",
+      "entry_function": "axiom_entry_main",
+      "module_sha256": "9940725580af1b9f4700ff921f7f17af8d13ba531dc7d46c8e72755b7c905a39",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I64",
+            "value": 0
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "memory_helpers_malloc",
+      "description": "Memory helper returning deterministic malloc pointer",
+      "entry_function": "malloc_ptr",
+      "module_sha256": "9940725580af1b9f4700ff921f7f17af8d13ba531dc7d46c8e72755b7c905a39",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65552
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65552
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65552
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    },
+    {
+      "slug": "memory_helpers_realloc",
+      "description": "Memory helper exercising realloc",
+      "entry_function": "realloc_twice",
+      "module_sha256": "9940725580af1b9f4700ff921f7f17af8d13ba531dc7d46c8e72755b7c905a39",
+      "tiers": [
+        {
+          "tier": "FastVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65600
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "StandardVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65600
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        },
+        {
+          "tier": "ComputeVM",
+          "execution_time_bucket": "<=5ms",
+          "gas_consumed": 0,
+          "return_value": {
+            "kind": "I32",
+            "value": 65600
+          },
+          "deterministic_state": "deterministic_state_placeholder"
+        }
+      ]
+    }
+  ]
+}
