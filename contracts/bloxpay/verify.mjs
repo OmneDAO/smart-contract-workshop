@@ -16,10 +16,11 @@
 
 import { encodeContractCall, AbiEncode, OmneClient, Wallet } from '@omne/sdk';
 
-const RPC_URL = 'https://rpc.ignis.omnechain.network';
+const RPC_URL = process.env.OMNE_RPC_URL || 'https://rpc.ignis.omnechain.network';
 
 // Live deployed contract (from deploy.mjs)
-const CONTRACT_ADDR = 'om1zfue6neu4ym5gc5e07qtd5z9r33f5r8xf4rmxt5';
+const CONTRACT_ADDR =
+  process.env.BLOXPAY_CONTRACT_ADDRESS || 'om1zs9l4e53jcmk0ea5t3tqnhdzgr4gz8mvm9ualkk';
 
 // Test data
 const TEST_LINK_ID = 'om1z7ewdaayh4ffxwmgans4tna0v00qyez3dd86a8y';
