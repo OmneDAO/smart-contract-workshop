@@ -298,7 +298,6 @@ pub enum HostFunction {
     StdRequireRole,
     StdEmit,
     StdTimestamp,
-    StdCryptoEd25519VerifyHex,
     StdCryptoSha256,
     StdMathDivFloor,
     StdMapGet,
@@ -332,7 +331,6 @@ impl HostFunction {
             "require_role" => Some(Self::StdRequireRole),
             "emit" => Some(Self::StdEmit),
             "timestamp" => Some(Self::StdTimestamp),
-            "ed25519_verify_hex" => Some(Self::StdCryptoEd25519VerifyHex),
             "sha256" => Some(Self::StdCryptoSha256),
             "div_floor" => Some(Self::StdMathDivFloor),
             "map_get" => Some(Self::StdMapGet),
@@ -362,7 +360,7 @@ impl HostFunction {
             | HostFunction::StdMapPut
             | HostFunction::StdMapRemove
             | HostFunction::StdMapContains => "std_runtime",
-            HostFunction::StdCryptoEd25519VerifyHex | HostFunction::StdCryptoSha256 => "std_crypto",
+            HostFunction::StdCryptoSha256 => "std_crypto",
             HostFunction::StdMathDivFloor => "std_math",
         }
     }
@@ -386,7 +384,6 @@ impl HostFunction {
             HostFunction::StdMapPut => "map_put",
             HostFunction::StdMapRemove => "map_remove",
             HostFunction::StdMapContains => "map_contains",
-            HostFunction::StdCryptoEd25519VerifyHex => "ed25519_verify_hex",
             HostFunction::StdCryptoSha256 => "sha256",
             HostFunction::StdMathDivFloor => "div_floor",
         }
@@ -411,7 +408,6 @@ impl HostFunction {
             HostFunction::StdMapPut => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapRemove => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
             HostFunction::StdMapContains => &[ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32],
-            HostFunction::StdCryptoEd25519VerifyHex => Self::I32_I32_I32_PARAMS,
             HostFunction::StdCryptoSha256 => Self::I32_I32_I32_PARAMS,
             HostFunction::StdMathDivFloor => Self::I64_I64_PARAMS,
         }
@@ -437,7 +433,6 @@ impl HostFunction {
             HostFunction::StdMapPut => None,
             HostFunction::StdMapRemove => None,
             HostFunction::StdMapContains => Some(ValueType::I32),
-            HostFunction::StdCryptoEd25519VerifyHex => Some(ValueType::I32),
             HostFunction::StdCryptoSha256 => Some(ValueType::I32),
             HostFunction::StdMathDivFloor => Some(ValueType::I64),
         }
