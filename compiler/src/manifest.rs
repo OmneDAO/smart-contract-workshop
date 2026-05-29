@@ -6844,11 +6844,18 @@ mod tests {
         };
 
         let mut data_allocator = DataAllocator::new();
+        let global_state_fields: HashMap<String, DslType> = module
+            .state_fields
+            .iter()
+            .map(|field| (field.name.clone(), field.ty.clone()))
+            .collect();
         let functions = lower_dsl_module(
             "token",
             &module,
             &empty_entrypoints(),
             &mut data_allocator,
+            &global_state_fields,
+            &HashMap::new(),
             &HashMap::new(),
         )
         .expect("lower module");
@@ -6896,11 +6903,18 @@ mod tests {
         };
 
         let mut data_allocator = DataAllocator::new();
+        let global_state_fields: HashMap<String, DslType> = module
+            .state_fields
+            .iter()
+            .map(|field| (field.name.clone(), field.ty.clone()))
+            .collect();
         let functions = lower_dsl_module(
             "token",
             &module,
             &empty_entrypoints(),
             &mut data_allocator,
+            &global_state_fields,
+            &HashMap::new(),
             &HashMap::new(),
         )
         .expect("lower module");
