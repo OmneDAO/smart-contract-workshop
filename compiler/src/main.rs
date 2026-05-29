@@ -277,7 +277,7 @@ fn print_usage() {
     eprintln!("  --manifest <path>        Compile a YAML manifest instead of a pysub source file");
     eprintln!("  --emit-metadata <path>   Write compilation metadata JSON to the given path");
     eprintln!("  --emit-wasm <path>       Write emitted WASM bytes to the given path");
-    eprintln!("  --signing-key <path>     Sign metadata with the Ed25519 key at the given path");
+    eprintln!("  --signing-key <path>     Sign metadata with the ML-DSA-44 key (32-byte seed) at the given path");
     eprintln!("  --no-sign                Skip metadata signing (unsafe)");
     eprintln!("  -h, --help               Show this help message");
 }
