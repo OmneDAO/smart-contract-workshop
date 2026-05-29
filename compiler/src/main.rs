@@ -1,13 +1,50 @@
 use std::{env, fs, path::PathBuf, process};
 
 use chrono::Utc;
-use ed25519_dalek::{Signer, SigningKey};
 use pysub_compiler::{
     compile_file_with_artifacts, compile_manifest_with_artifacts,
     metadata::{canonical_metadata_digest, CompilationMetadata},
 };
+use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::Serialize;
+
+/// ML-DSA-44 (FIPS 204) signing helpers. These MUST stay byte-compatible with
+/// `deploy_guardrails::pqc` (the node-side verifier): same 32-byte-seed → keypair
+/// derivation (ChaCha20) and the same empty signing context, or compiler-emitted
+/// metadata signatures will fail verification on the node.
+mod pqc {
+    pub const SECRET_KEY_LEN: usize = 2560;
+    pub const ALGORITHM_ID: &str = "ml-dsa-44";
+
+    /// Deterministically derive an ML-DSA-44 keypair from a 32-byte seed.
+    pub fn keygen_from_seed(seed: [u8; 32]) -> (Vec<u8>, Vec<u8>) {
+        use fips204::ml_dsa_44;
+        use fips204::traits::SerDes;
+        use rand::SeedableRng;
+
+        let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+        let (pk, sk) = ml_dsa_44::try_keygen_with_rng(&mut rng)
+            .expect("ML-DSA-44 seeded keygen cannot fail for a 32-byte seed");
+        (pk.into_bytes().to_vec(), sk.into_bytes().to_vec())
+    }
+
+    /// Sign a message with an ML-DSA-44 secret key. Returns the 2,420-byte signature.
+    pub fn sign(secret_key: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+        use fips204::ml_dsa_44;
+        use fips204::traits::{SerDes, Signer};
+
+        let sk_arr: [u8; SECRET_KEY_LEN] = secret_key
+            .try_into()
+            .map_err(|_| format!("ML-DSA-44 secret key must be {SECRET_KEY_LEN} bytes"))?;
+        let sk = ml_dsa_44::PrivateKey::try_from_bytes(sk_arr)
+            .map_err(|_| "invalid ML-DSA-44 secret key".to_string())?;
+        let sig = sk
+            .try_sign(message, &[])
+            .map_err(|_| "ML-DSA-44 signing failed".to_string())?;
+        Ok(sig.to_vec())
+    }
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -162,30 +199,30 @@ fn sign_metadata(
     options: &CliOptions,
     metadata_path: &str,
 ) -> Result<MetadataSignature, String> {
-    let signing_key = if let Some(path) = options.signing_key.as_deref() {
-        load_signing_key(path)?
+    let seed = if let Some(path) = options.signing_key.as_deref() {
+        load_signing_seed(path)?
     } else {
-        let (key, written_path) = generate_ephemeral_signing_key(metadata_path)?;
+        let (seed, written_path) = generate_ephemeral_signing_key(metadata_path)?;
         println!("Ephemeral signing key written to {written_path}");
-        key
+        seed
     };
 
     let digest = canonical_metadata_digest(metadata)
         .map_err(|err| format!("failed to compute metadata digest: {err}"))?;
 
-    let signature = signing_key.sign(digest.as_ref());
-    let verifying_key = signing_key.verifying_key();
+    let (public_key, secret_key) = pqc::keygen_from_seed(seed);
+    let signature = pqc::sign(&secret_key, digest.as_ref())?;
 
     Ok(MetadataSignature {
-        algorithm: "ed25519".to_string(),
-        public_key_hex: hex::encode(verifying_key.to_bytes()),
-        signature_hex: hex::encode(signature.to_bytes()),
+        algorithm: pqc::ALGORITHM_ID.to_string(),
+        public_key_hex: hex::encode(&public_key),
+        signature_hex: hex::encode(&signature),
         digest_hex: hex::encode(digest),
         signed_at: Utc::now().to_rfc3339(),
     })
 }
 
-fn load_signing_key(path: &str) -> Result<SigningKey, String> {
+fn load_signing_seed(path: &str) -> Result<[u8; 32], String> {
     let raw = fs::read(path)
         .map_err(|err| format!("failed to read signing key from {path}: {err}"))?;
 
@@ -203,21 +240,19 @@ fn load_signing_key(path: &str) -> Result<SigningKey, String> {
         }
     };
 
-    let secret_array: [u8; 32] = secret_bytes
+    secret_bytes
         .try_into()
-        .map_err(|_| "signing key must decode to exactly 32 bytes".to_string())?;
-
-    Ok(SigningKey::from_bytes(&secret_array))
+        .map_err(|_| "signing key seed must decode to exactly 32 bytes".to_string())
 }
 
-fn generate_ephemeral_signing_key(metadata_path: &str) -> Result<(SigningKey, String), String> {
-    let mut rng = OsRng;
-    let signing_key = SigningKey::generate(&mut rng);
+fn generate_ephemeral_signing_key(metadata_path: &str) -> Result<([u8; 32], String), String> {
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
     let mut key_path = PathBuf::from(metadata_path);
     key_path.set_extension("signing-key");
-    fs::write(&key_path, format!("{}\n", hex::encode(signing_key.to_bytes())))
+    fs::write(&key_path, format!("{}\n", hex::encode(seed)))
         .map_err(|err| format!("failed to write ephemeral signing key to {}: {err}", key_path.display()))?;
-    Ok((signing_key, key_path.display().to_string()))
+    Ok((seed, key_path.display().to_string()))
 }
 
 #[derive(Serialize)]
