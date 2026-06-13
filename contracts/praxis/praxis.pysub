@@ -1,38 +1,43 @@
 # ---------------------------------------------------------------------------
-# praxis — Permission registry for autonomous-agent accountability on Omne.
+# praxis — Permission registry + Policy Enforcement Point for autonomous-agent
+# accountability on Omne.  (v0.2 — Phase 0 enforcement core, 2026-06-13)
 #
-# The contract is the on-chain state machine for permission tokens that
-# scope, bound, and audit autonomous-agent activity. A principal mints a
-# permission token to designate an agent's authority. The agent records
-# actions taken under that authority. The substrate enforces the four
-# load-bearing accountability invariants at action time:
+# The contract is the on-chain state machine + Mode-1 Policy Enforcement Point
+# (PEP) for permission tokens that scope, bound, and audit autonomous-agent
+# activity. A principal mints a permission token to designate an agent's
+# authority. The agent records actions taken under that authority. The
+# substrate ENFORCES the accountability invariants at action time — it refuses
+# the out-of-scope action BEFORE the state change commits (prevention-first;
+# see spec §02b enforcement model). Enforcement is substrate-native and
+# unforgeable by the agent: a compromised or prompt-injected agent gets the
+# same refusal, because there is no runtime-local check to bypass.
 #
-#   1. Existence: the permission token was minted (state[token] != 0)
-#   2. Status:    the permission is active (not revoked)
-#   3. Window:    current_time <= valid_until
-#   4. Bound:     total_spent + amount_spent <= max_spend
+# Enforced invariants (record_action, in precedence order):
+#   1. Existence:  the permission token was minted          (else 0 not_found)
+#   2. Status:     the permission is active, not revoked     (else 2 revoked)
+#   3. Window:     current_time <= valid_until               (else 3 expired)
+#   4. Bound:      total_spent + amount_spent <= max_spend    (else 4 over_budget)
+#   5. Allowlist:  if enabled, counterparty is allowlisted    (else 5 out_of_allowlist)
 #
-# Off-chain orchestration (Praxis SDK + sub-agent drivers) signs the
-# transactions; the substrate finalizes them via PoVERA + BFT and emits
-# events that constitute the audit trail.
+# Versioned policy (spec §2.2): every permission carries a policy_version that
+# increments on each authorized update_policy. Decisions are forever attributable
+# to the policy version in force at action time (the version is on-chain state).
 #
-# Token-id model: token_id is a 20-byte address derived as
-#   SHA-256(principal || agent || nonce || created_at)[0..20] — keyed across
-# maps. The Praxis SDK constructs the token_id deterministically off-chain
-# and includes it as a method parameter; the contract checks first-write
-# semantics (existing == 0) to prevent reuse.
+# Counterparty allowlist (spec §2.2 / §4 Scenario A): when allowlist_enabled == 1,
+# an action is refused unless its counterparty has been authorized by the
+# principal via add_allowed_counterparty. The allowlist is keyed by a 32-byte
+# composite key the SDK derives off-chain as SHA-256(token_id || counterparty);
+# the contract stores/checks membership without needing an on-chain hash builtin.
 #
-# Status enum:
-#   0 = nonexistent (default for unset map slot)
-#   1 = active      (mint succeeded; agent may record actions)
-#   2 = revoked     (principal explicitly burned; terminal)
+# Status enum:  0 = nonexistent, 1 = active, 2 = revoked (terminal)
 #
-# record_action return codes (per Praxis spec §02 attestation semantics):
-#   0 = not_found     (token never minted, or wrong token_id)
-#   1 = success       (action recorded; state updated)
-#   2 = revoked       (token revoked before this action)
-#   3 = expired       (current_time > valid_until)
-#   4 = over_budget   (total_spent + amount_spent > max_spend)
+# record_action return codes:
+#   0 = not_found       (token never minted, or wrong token_id)
+#   1 = success         (action recorded; state updated)
+#   2 = revoked         (token revoked before this action)
+#   3 = expired         (current_time > valid_until)
+#   4 = over_budget     (total_spent + amount_spent > max_spend)
+#   5 = out_of_allowlist (allowlist enabled and counterparty not authorized)
 # ---------------------------------------------------------------------------
 
 module: praxis_permissions
@@ -47,15 +52,30 @@ state:
     permission_action_count: map<address, uint128>
     permission_created_at: map<address, uint128>
     permission_revoked_at: map<address, uint128>
+    permission_policy_version: map<address, uint128>
+    permission_allowlist_enabled: map<address, uint128>
+    permission_allowlist: map<address, uint128>
+    # --- Decision Attestation Service (Mode 3 / provable-after) ---
+    # Each attestation commits a decision's context hash + the policy version in
+    # force at decision time + a verdict, keyed by an SDK-derived attestation_id.
+    # The full decision artifact lives off-chain; re-hashing it must match the
+    # committed context_hash (tamper-evidence). Binds non-payment DECISIONS
+    # (claims, underwriting) to a verifiable on-chain record.
+    attestation_exists: map<address, uint128>
+    attestation_token: map<address, address>
+    attestation_context_hash: map<address, address>
+    attestation_policy_version: map<address, uint128>
+    attestation_verdict: map<address, uint128>
+    attestation_time: map<address, uint128>
+    permission_attestation_count: map<address, uint128>
 
 functions:
 
 # Mint a new permission token. First-write semantics — fails if the token_id
-# is already in use (returns 0). Returns 1 on success. The Praxis SDK is
-# expected to derive token_id deterministically from (principal, agent,
-# nonce, current_time) so that double-mint attempts have a well-defined
-# failure mode.
-fn mint_permission(token_id: address, principal: address, agent: address, max_spend: uint128, valid_until: uint128, current_time: uint128) -> uint128:
+# is already in use (returns 0). Returns 1 on success. allowlist_enabled = 1
+# turns on counterparty-allowlist enforcement for this permission (0 = no
+# counterparty restriction). policy_version starts at 1.
+fn mint_permission(token_id: address, principal: address, agent: address, max_spend: uint128, valid_until: uint128, allowlist_enabled: uint128, current_time: uint128) -> uint128:
     let existing: uint128 = permission_status[token_id]
     if existing > 0:
         return 0
@@ -67,13 +87,41 @@ fn mint_permission(token_id: address, principal: address, agent: address, max_sp
     permission_total_spent[token_id] = 0
     permission_action_count[token_id] = 0
     permission_created_at[token_id] = current_time
+    permission_policy_version[token_id] = 1
+    permission_allowlist_enabled[token_id] = allowlist_enabled
     return 1
 
-# Record an action submitted by the designated agent under a permission
-# token. Enforces all four accountability invariants at the substrate
-# level. Returns a typed code per spec §02 so the SDK and audit-replay
-# tooling can render the precise rejection reason.
-fn record_action(token_id: address, amount_spent: uint128, current_time: uint128) -> uint128:
+# Principal authorizes a counterparty for a permission's allowlist. counterparty_key
+# is the SDK-derived SHA-256(token_id || counterparty) composite key. Returns 0 if
+# the token is not active; 1 on success. (Caller-authorization is enforced off-chain
+# by the signing principal today; on-chain caller binding is a Phase-1 hardening item.)
+fn add_allowed_counterparty(token_id: address, counterparty_key: address, current_time: uint128) -> uint128:
+    let status: uint128 = permission_status[token_id]
+    if status != 1:
+        return 0
+    permission_allowlist[counterparty_key] = 1
+    return 1
+
+# Update a permission's policy (limits) and bump its on-chain policy_version.
+# Returns 0 if the token is not active; otherwise returns the new version number.
+# The version chain makes every action attributable to the policy in force at the time.
+fn update_policy(token_id: address, new_max_spend: uint128, new_valid_until: uint128, current_time: uint128) -> uint128:
+    let status: uint128 = permission_status[token_id]
+    if status != 1:
+        return 0
+    permission_max_spend[token_id] = new_max_spend
+    permission_valid_until[token_id] = new_valid_until
+    let version: uint128 = permission_policy_version[token_id]
+    let new_version: uint128 = version + 1
+    permission_policy_version[token_id] = new_version
+    return new_version
+
+# Record an action submitted by the designated agent under a permission token.
+# This is the Mode-1 Policy Enforcement Point: the invariants are evaluated and
+# the action is REFUSED (no state mutation) before it commits if any fails.
+# counterparty_key is the SDK-derived SHA-256(token_id || counterparty); it is
+# ignored when allowlist_enabled == 0. Returns a typed code per the header.
+fn record_action(token_id: address, amount_spent: uint128, counterparty_key: address, current_time: uint128) -> uint128:
     let status: uint128 = permission_status[token_id]
     if status == 0:
         return 0
@@ -87,6 +135,11 @@ fn record_action(token_id: address, amount_spent: uint128, current_time: uint128
     let new_total: uint128 = total + amount_spent
     if new_total > cap:
         return 4
+    let allowlist_on: uint128 = permission_allowlist_enabled[token_id]
+    if allowlist_on == 1:
+        let allowed: uint128 = permission_allowlist[counterparty_key]
+        if allowed != 1:
+            return 5
     permission_total_spent[token_id] = new_total
     let count: uint128 = permission_action_count[token_id]
     permission_action_count[token_id] = count + 1
@@ -94,13 +147,37 @@ fn record_action(token_id: address, amount_spent: uint128, current_time: uint128
 
 # Revoke an active permission token. Terminal state. Idempotent: returns 0
 # if the token is already revoked or never existed; returns 1 on the
-# transition active → revoked.
+# transition active -> revoked.
 fn revoke_permission(token_id: address, current_time: uint128) -> uint128:
     let status: uint128 = permission_status[token_id]
     if status != 1:
         return 0
     permission_status[token_id] = 2
     permission_revoked_at[token_id] = current_time
+    return 1
+
+# Record a decision attestation (Mode 3 / provable-after). Commits the decision's
+# context_hash + the policy version in force on the referenced permission + a
+# verdict (1 = in_policy, 2 = out_of_policy), keyed by the SDK-derived
+# attestation_id. First-write: a reused attestation_id fails (returns 0). The
+# token must exist. The committed context_hash is the tamper-evidence anchor —
+# an auditor re-hashes the off-chain artifact and confirms it matches.
+fn record_attestation(attestation_id: address, token_id: address, context_hash: address, verdict: uint128, current_time: uint128) -> uint128:
+    let exists: uint128 = attestation_exists[attestation_id]
+    if exists > 0:
+        return 0
+    let status: uint128 = permission_status[token_id]
+    if status == 0:
+        return 0
+    attestation_exists[attestation_id] = 1
+    attestation_token[attestation_id] = token_id
+    attestation_context_hash[attestation_id] = context_hash
+    let pv: uint128 = permission_policy_version[token_id]
+    attestation_policy_version[attestation_id] = pv
+    attestation_verdict[attestation_id] = verdict
+    attestation_time[attestation_id] = current_time
+    let c: uint128 = permission_attestation_count[token_id]
+    permission_attestation_count[token_id] = c + 1
     return 1
 
 # --- Read-only queries ---------------------------------------------------
@@ -131,3 +208,30 @@ fn get_created_at(token_id: address) -> uint128:
 
 fn get_revoked_at(token_id: address) -> uint128:
     return permission_revoked_at[token_id]
+
+fn get_policy_version(token_id: address) -> uint128:
+    return permission_policy_version[token_id]
+
+fn get_allowlist_enabled(token_id: address) -> uint128:
+    return permission_allowlist_enabled[token_id]
+
+fn is_counterparty_allowed(counterparty_key: address) -> uint128:
+    return permission_allowlist[counterparty_key]
+
+fn get_attestation_exists(attestation_id: address) -> uint128:
+    return attestation_exists[attestation_id]
+
+fn get_attestation_context_hash(attestation_id: address) -> address:
+    return attestation_context_hash[attestation_id]
+
+fn get_attestation_policy_version(attestation_id: address) -> uint128:
+    return attestation_policy_version[attestation_id]
+
+fn get_attestation_verdict(attestation_id: address) -> uint128:
+    return attestation_verdict[attestation_id]
+
+fn get_attestation_time(attestation_id: address) -> uint128:
+    return attestation_time[attestation_id]
+
+fn get_attestation_count(token_id: address) -> uint128:
+    return permission_attestation_count[token_id]

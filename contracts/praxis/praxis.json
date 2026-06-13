@@ -2,10 +2,10 @@
   "metadata": {
     "metadata_version": "1.0",
     "compiler_version": "0.1.0",
-    "generated_at": "2026-06-13T12:49:47.613937+00:00",
-    "source_path": "contracts/praxis/praxis.yml",
-    "wasm_sha256": "dcb4619027cefdaed6784d605f1387f0dc18ab4ee5a1e2523f6f0122d0f1b26d",
-    "wasm_size_bytes": 3664,
+    "generated_at": "2026-06-13T23:21:31.170798+00:00",
+    "source_path": "praxis.yml",
+    "wasm_sha256": "7b62af3e1aa37967008d41f99a2afc3309b0f0c933da37e7548f4a64f2d89fcb",
+    "wasm_size_bytes": 7711,
     "contracts": [
       {
         "name": "praxis_permissions",
@@ -38,6 +38,54 @@
                 "ty": "i64"
               },
               {
+                "name": "allowlist_enabled",
+                "ty": "i64"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "add_allowed_counterparty",
+            "selector": "praxis_permissions::add_allowed_counterparty",
+            "export": "axiom_contract::praxis_permissions::add_allowed_counterparty",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "counterparty_key",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "update_policy",
+            "selector": "praxis_permissions::update_policy",
+            "export": "axiom_contract::praxis_permissions::update_policy",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "new_max_spend",
+                "ty": "i64"
+              },
+              {
+                "name": "new_valid_until",
+                "ty": "i64"
+              },
+              {
                 "name": "current_time",
                 "ty": "i64"
               }
@@ -58,6 +106,10 @@
                 "ty": "i64"
               },
               {
+                "name": "counterparty_key",
+                "ty": "i32"
+              },
+              {
                 "name": "current_time",
                 "ty": "i64"
               }
@@ -72,6 +124,34 @@
               {
                 "name": "token_id",
                 "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "record_attestation",
+            "selector": "praxis_permissions::record_attestation",
+            "export": "axiom_contract::praxis_permissions::record_attestation",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              },
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "context_hash",
+                "ty": "i32"
+              },
+              {
+                "name": "verdict",
+                "ty": "i64"
               },
               {
                 "name": "current_time",
@@ -180,6 +260,114 @@
             "name": "get_revoked_at",
             "selector": "praxis_permissions::get_revoked_at",
             "export": "axiom_contract::praxis_permissions::get_revoked_at",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_policy_version",
+            "selector": "praxis_permissions::get_policy_version",
+            "export": "axiom_contract::praxis_permissions::get_policy_version",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_allowlist_enabled",
+            "selector": "praxis_permissions::get_allowlist_enabled",
+            "export": "axiom_contract::praxis_permissions::get_allowlist_enabled",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "is_counterparty_allowed",
+            "selector": "praxis_permissions::is_counterparty_allowed",
+            "export": "axiom_contract::praxis_permissions::is_counterparty_allowed",
+            "params": [
+              {
+                "name": "counterparty_key",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_exists",
+            "selector": "praxis_permissions::get_attestation_exists",
+            "export": "axiom_contract::praxis_permissions::get_attestation_exists",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_context_hash",
+            "selector": "praxis_permissions::get_attestation_context_hash",
+            "export": "axiom_contract::praxis_permissions::get_attestation_context_hash",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_attestation_policy_version",
+            "selector": "praxis_permissions::get_attestation_policy_version",
+            "export": "axiom_contract::praxis_permissions::get_attestation_policy_version",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_verdict",
+            "selector": "praxis_permissions::get_attestation_verdict",
+            "export": "axiom_contract::praxis_permissions::get_attestation_verdict",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_time",
+            "selector": "praxis_permissions::get_attestation_time",
+            "export": "axiom_contract::praxis_permissions::get_attestation_time",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_count",
+            "selector": "praxis_permissions::get_attestation_count",
+            "export": "axiom_contract::praxis_permissions::get_attestation_count",
             "params": [
               {
                 "name": "token_id",
