@@ -55,6 +55,19 @@ state:
     permission_policy_version: map<address, uint128>
     permission_allowlist_enabled: map<address, uint128>
     permission_allowlist: map<address, uint128>
+    # --- Decision Attestation Service (Mode 3 / provable-after) ---
+    # Each attestation commits a decision's context hash + the policy version in
+    # force at decision time + a verdict, keyed by an SDK-derived attestation_id.
+    # The full decision artifact lives off-chain; re-hashing it must match the
+    # committed context_hash (tamper-evidence). Binds non-payment DECISIONS
+    # (claims, underwriting) to a verifiable on-chain record.
+    attestation_exists: map<address, uint128>
+    attestation_token: map<address, address>
+    attestation_context_hash: map<address, address>
+    attestation_policy_version: map<address, uint128>
+    attestation_verdict: map<address, uint128>
+    attestation_time: map<address, uint128>
+    permission_attestation_count: map<address, uint128>
 
 functions:
 
@@ -143,6 +156,30 @@ fn revoke_permission(token_id: address, current_time: uint128) -> uint128:
     permission_revoked_at[token_id] = current_time
     return 1
 
+# Record a decision attestation (Mode 3 / provable-after). Commits the decision's
+# context_hash + the policy version in force on the referenced permission + a
+# verdict (1 = in_policy, 2 = out_of_policy), keyed by the SDK-derived
+# attestation_id. First-write: a reused attestation_id fails (returns 0). The
+# token must exist. The committed context_hash is the tamper-evidence anchor —
+# an auditor re-hashes the off-chain artifact and confirms it matches.
+fn record_attestation(attestation_id: address, token_id: address, context_hash: address, verdict: uint128, current_time: uint128) -> uint128:
+    let exists: uint128 = attestation_exists[attestation_id]
+    if exists > 0:
+        return 0
+    let status: uint128 = permission_status[token_id]
+    if status == 0:
+        return 0
+    attestation_exists[attestation_id] = 1
+    attestation_token[attestation_id] = token_id
+    attestation_context_hash[attestation_id] = context_hash
+    let pv: uint128 = permission_policy_version[token_id]
+    attestation_policy_version[attestation_id] = pv
+    attestation_verdict[attestation_id] = verdict
+    attestation_time[attestation_id] = current_time
+    let c: uint128 = permission_attestation_count[token_id]
+    permission_attestation_count[token_id] = c + 1
+    return 1
+
 # --- Read-only queries ---------------------------------------------------
 
 fn get_status(token_id: address) -> uint128:
@@ -180,3 +217,21 @@ fn get_allowlist_enabled(token_id: address) -> uint128:
 
 fn is_counterparty_allowed(counterparty_key: address) -> uint128:
     return permission_allowlist[counterparty_key]
+
+fn get_attestation_exists(attestation_id: address) -> uint128:
+    return attestation_exists[attestation_id]
+
+fn get_attestation_context_hash(attestation_id: address) -> address:
+    return attestation_context_hash[attestation_id]
+
+fn get_attestation_policy_version(attestation_id: address) -> uint128:
+    return attestation_policy_version[attestation_id]
+
+fn get_attestation_verdict(attestation_id: address) -> uint128:
+    return attestation_verdict[attestation_id]
+
+fn get_attestation_time(attestation_id: address) -> uint128:
+    return attestation_time[attestation_id]
+
+fn get_attestation_count(token_id: address) -> uint128:
+    return permission_attestation_count[token_id]

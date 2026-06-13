@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 contract: praxis_permissions
-version: 0.2.0
+version: 0.3.0
 modules:
   - name: praxis_permissions
     path: praxis.pysub
@@ -19,6 +19,8 @@ entrypoints:
     name: record_action
   - module: praxis_permissions
     name: revoke_permission
+  - module: praxis_permissions
+    name: record_attestation
   - module: praxis_permissions
     name: get_status
   - module: praxis_permissions
@@ -43,3 +45,15 @@ entrypoints:
     name: get_allowlist_enabled
   - module: praxis_permissions
     name: is_counterparty_allowed
+  - module: praxis_permissions
+    name: get_attestation_exists
+  - module: praxis_permissions
+    name: get_attestation_context_hash
+  - module: praxis_permissions
+    name: get_attestation_policy_version
+  - module: praxis_permissions
+    name: get_attestation_verdict
+  - module: praxis_permissions
+    name: get_attestation_time
+  - module: praxis_permissions
+    name: get_attestation_count

@@ -2,10 +2,10 @@
   "metadata": {
     "metadata_version": "1.0",
     "compiler_version": "0.1.0",
-    "generated_at": "2026-06-13T20:36:47.714360+00:00",
+    "generated_at": "2026-06-13T23:21:31.170798+00:00",
     "source_path": "praxis.yml",
-    "wasm_sha256": "34833e8fb1b02c0c44a32ec83d489a709750bd9efe64c376a921ec261567b61a",
-    "wasm_size_bytes": 5470,
+    "wasm_sha256": "7b62af3e1aa37967008d41f99a2afc3309b0f0c933da37e7548f4a64f2d89fcb",
+    "wasm_size_bytes": 7711,
     "contracts": [
       {
         "name": "praxis_permissions",
@@ -124,6 +124,34 @@
               {
                 "name": "token_id",
                 "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "record_attestation",
+            "selector": "praxis_permissions::record_attestation",
+            "export": "axiom_contract::praxis_permissions::record_attestation",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              },
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "context_hash",
+                "ty": "i32"
+              },
+              {
+                "name": "verdict",
+                "ty": "i64"
               },
               {
                 "name": "current_time",
@@ -271,6 +299,78 @@
             "params": [
               {
                 "name": "counterparty_key",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_exists",
+            "selector": "praxis_permissions::get_attestation_exists",
+            "export": "axiom_contract::praxis_permissions::get_attestation_exists",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_context_hash",
+            "selector": "praxis_permissions::get_attestation_context_hash",
+            "export": "axiom_contract::praxis_permissions::get_attestation_context_hash",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_attestation_policy_version",
+            "selector": "praxis_permissions::get_attestation_policy_version",
+            "export": "axiom_contract::praxis_permissions::get_attestation_policy_version",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_verdict",
+            "selector": "praxis_permissions::get_attestation_verdict",
+            "export": "axiom_contract::praxis_permissions::get_attestation_verdict",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_time",
+            "selector": "praxis_permissions::get_attestation_time",
+            "export": "axiom_contract::praxis_permissions::get_attestation_time",
+            "params": [
+              {
+                "name": "attestation_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_attestation_count",
+            "selector": "praxis_permissions::get_attestation_count",
+            "export": "axiom_contract::praxis_permissions::get_attestation_count",
+            "params": [
+              {
+                "name": "token_id",
                 "ty": "i32"
               }
             ],
