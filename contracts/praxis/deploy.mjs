@@ -20,6 +20,56 @@ import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// --- bech32m (BIP-350) encoder, no deps ---
+// The chain is uniformly 32-byte (PQC). A contract address is the bech32m
+// encoding of the FULL 32-byte SHA-256 deployment digest under HRP "om" +
+// witness version 2 (the same scheme as demo/src/address.ts:encodeAddress).
+const BECH32M_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32M_CONST = 0x2bc830a3;
+function bech32mPolymod(values) {
+  let chk = 1;
+  const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  for (const v of values) {
+    const top = chk >> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= GEN[i];
+  }
+  return chk;
+}
+function bech32mHrpExpand(hrp) {
+  const r = [];
+  for (let i = 0; i < hrp.length; i++) r.push(hrp.charCodeAt(i) >> 5);
+  r.push(0);
+  for (let i = 0; i < hrp.length; i++) r.push(hrp.charCodeAt(i) & 31);
+  return r;
+}
+function bech32mChecksum(hrp, data) {
+  const values = bech32mHrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
+  const mod = bech32mPolymod(values) ^ BECH32M_CONST;
+  const r = [];
+  for (let i = 0; i < 6; i++) r.push((mod >> (5 * (5 - i))) & 31);
+  return r;
+}
+function bech32mConvertBits(data, from, to, pad) {
+  let acc = 0, bits = 0;
+  const ret = [];
+  const maxv = (1 << to) - 1;
+  for (const b of data) {
+    acc = (acc << from) | b;
+    bits += from;
+    while (bits >= to) { bits -= to; ret.push((acc >> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (to - bits)) & maxv);
+  return ret;
+}
+function encodeOmneAddress(payload32) {
+  const data = [2].concat(bech32mConvertBits(Array.from(payload32), 8, 5, true));
+  const combined = data.concat(bech32mChecksum('om', data));
+  let out = 'om1';
+  for (const d of combined) out += BECH32M_CHARSET[d];
+  return out;
+}
+
 // --- Config ---
 const RPC_URL = process.argv[2] || 'http://127.0.0.1:26657';
 const WASM_PATH = join(__dirname, 'praxis.wasm');
@@ -162,15 +212,17 @@ async function deploy() {
   console.log('\n✅ Deployment successful!');
   console.log(JSON.stringify(result.result, null, 2));
 
-  // Derive the contract address locally.
+  // Derive the contract address locally. The node bech32m-encodes the FULL
+  // 32-byte SHA-256 digest (witness v2, HRP "om") — NOT a truncated 20-byte
+  // 'omne1'+hex string. This must match the node's derivation and config.ts.
   const addrHasher = createHash('sha256');
   addrHasher.update(wasmBytes);
   addrHasher.update(contract.name);
   addrHasher.update('get_status');
   addrHasher.update(`axiom_contract::${contract.name}::get_status`);
   addrHasher.update(Buffer.from(deploymentNonce, 'hex'));
-  const addrDigest = addrHasher.digest();
-  const contractAddress = 'omne1' + addrDigest.subarray(0, 20).toString('hex');
+  const addrDigest = addrHasher.digest(); // 32 bytes
+  const contractAddress = encodeOmneAddress(addrDigest);
 
   console.log(`\nContract address (derived): ${contractAddress}`);
   if (result.result?.transactionHash) {
