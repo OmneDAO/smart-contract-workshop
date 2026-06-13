@@ -4,13 +4,17 @@
 # ---------------------------------------------------------------------------
 
 contract: praxis_permissions
-version: 0.1.0
+version: 0.2.0
 modules:
   - name: praxis_permissions
     path: praxis.pysub
 entrypoints:
   - module: praxis_permissions
     name: mint_permission
+  - module: praxis_permissions
+    name: add_allowed_counterparty
+  - module: praxis_permissions
+    name: update_policy
   - module: praxis_permissions
     name: record_action
   - module: praxis_permissions
@@ -33,3 +37,9 @@ entrypoints:
     name: get_created_at
   - module: praxis_permissions
     name: get_revoked_at
+  - module: praxis_permissions
+    name: get_policy_version
+  - module: praxis_permissions
+    name: get_allowlist_enabled
+  - module: praxis_permissions
+    name: is_counterparty_allowed
