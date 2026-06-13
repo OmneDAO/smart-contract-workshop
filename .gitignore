@@ -13,3 +13,4 @@ Cargo.lock
 /.vscode/
 .idea/
 .DS_Store
+contracts/praxis/deployed-address.json
