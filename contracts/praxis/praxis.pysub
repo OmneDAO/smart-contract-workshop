@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# praxis — Permission registry for autonomous-agent accountability on Omne.
+#
+# The contract is the on-chain state machine for permission tokens that
+# scope, bound, and audit autonomous-agent activity. A principal mints a
+# permission token to designate an agent's authority. The agent records
+# actions taken under that authority. The substrate enforces the four
+# load-bearing accountability invariants at action time:
+#
+#   1. Existence: the permission token was minted (state[token] != 0)
+#   2. Status:    the permission is active (not revoked)
+#   3. Window:    current_time <= valid_until
+#   4. Bound:     total_spent + amount_spent <= max_spend
+#
+# Off-chain orchestration (Praxis SDK + sub-agent drivers) signs the
+# transactions; the substrate finalizes them via PoVERA + BFT and emits
+# events that constitute the audit trail.
+#
+# Token-id model: token_id is a 20-byte address derived as
+#   SHA-256(principal || agent || nonce || created_at)[0..20] — keyed across
+# maps. The Praxis SDK constructs the token_id deterministically off-chain
+# and includes it as a method parameter; the contract checks first-write
+# semantics (existing == 0) to prevent reuse.
+#
+# Status enum:
+#   0 = nonexistent (default for unset map slot)
+#   1 = active      (mint succeeded; agent may record actions)
+#   2 = revoked     (principal explicitly burned; terminal)
+#
+# record_action return codes (per Praxis spec §02 attestation semantics):
+#   0 = not_found     (token never minted, or wrong token_id)
+#   1 = success       (action recorded; state updated)
+#   2 = revoked       (token revoked before this action)
+#   3 = expired       (current_time > valid_until)
+#   4 = over_budget   (total_spent + amount_spent > max_spend)
+# ---------------------------------------------------------------------------
+
+module: praxis_permissions
+
+state:
+    permission_status: map<address, uint128>
+    permission_principal: map<address, address>
+    permission_agent: map<address, address>
+    permission_max_spend: map<address, uint128>
+    permission_valid_until: map<address, uint128>
+    permission_total_spent: map<address, uint128>
+    permission_action_count: map<address, uint128>
+    permission_created_at: map<address, uint128>
+    permission_revoked_at: map<address, uint128>
+
+functions:
+
+# Mint a new permission token. First-write semantics — fails if the token_id
+# is already in use (returns 0). Returns 1 on success. The Praxis SDK is
+# expected to derive token_id deterministically from (principal, agent,
+# nonce, current_time) so that double-mint attempts have a well-defined
+# failure mode.
+fn mint_permission(token_id: address, principal: address, agent: address, max_spend: uint128, valid_until: uint128, current_time: uint128) -> uint128:
+    let existing: uint128 = permission_status[token_id]
+    if existing > 0:
+        return 0
+    permission_status[token_id] = 1
+    permission_principal[token_id] = principal
+    permission_agent[token_id] = agent
+    permission_max_spend[token_id] = max_spend
+    permission_valid_until[token_id] = valid_until
+    permission_total_spent[token_id] = 0
+    permission_action_count[token_id] = 0
+    permission_created_at[token_id] = current_time
+    return 1
+
+# Record an action submitted by the designated agent under a permission
+# token. Enforces all four accountability invariants at the substrate
+# level. Returns a typed code per spec §02 so the SDK and audit-replay
+# tooling can render the precise rejection reason.
+fn record_action(token_id: address, amount_spent: uint128, current_time: uint128) -> uint128:
+    let status: uint128 = permission_status[token_id]
+    if status == 0:
+        return 0
+    if status == 2:
+        return 2
+    let valid_until: uint128 = permission_valid_until[token_id]
+    if current_time > valid_until:
+        return 3
+    let total: uint128 = permission_total_spent[token_id]
+    let cap: uint128 = permission_max_spend[token_id]
+    let new_total: uint128 = total + amount_spent
+    if new_total > cap:
+        return 4
+    permission_total_spent[token_id] = new_total
+    let count: uint128 = permission_action_count[token_id]
+    permission_action_count[token_id] = count + 1
+    return 1
+
+# Revoke an active permission token. Terminal state. Idempotent: returns 0
+# if the token is already revoked or never existed; returns 1 on the
+# transition active → revoked.
+fn revoke_permission(token_id: address, current_time: uint128) -> uint128:
+    let status: uint128 = permission_status[token_id]
+    if status != 1:
+        return 0
+    permission_status[token_id] = 2
+    permission_revoked_at[token_id] = current_time
+    return 1
+
+# --- Read-only queries ---------------------------------------------------
+
+fn get_status(token_id: address) -> uint128:
+    return permission_status[token_id]
+
+fn get_principal(token_id: address) -> address:
+    return permission_principal[token_id]
+
+fn get_agent(token_id: address) -> address:
+    return permission_agent[token_id]
+
+fn get_max_spend(token_id: address) -> uint128:
+    return permission_max_spend[token_id]
+
+fn get_valid_until(token_id: address) -> uint128:
+    return permission_valid_until[token_id]
+
+fn get_total_spent(token_id: address) -> uint128:
+    return permission_total_spent[token_id]
+
+fn get_action_count(token_id: address) -> uint128:
+    return permission_action_count[token_id]
+
+fn get_created_at(token_id: address) -> uint128:
+    return permission_created_at[token_id]
+
+fn get_revoked_at(token_id: address) -> uint128:
+    return permission_revoked_at[token_id]

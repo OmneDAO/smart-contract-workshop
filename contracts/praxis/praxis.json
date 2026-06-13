@@ -1,0 +1,244 @@
+{
+  "metadata": {
+    "metadata_version": "1.0",
+    "compiler_version": "0.1.0",
+    "generated_at": "2026-06-13T12:49:47.613937+00:00",
+    "source_path": "contracts/praxis/praxis.yml",
+    "wasm_sha256": "dcb4619027cefdaed6784d605f1387f0dc18ab4ee5a1e2523f6f0122d0f1b26d",
+    "wasm_size_bytes": 3664,
+    "contracts": [
+      {
+        "name": "praxis_permissions",
+        "params": [],
+        "storage": [],
+        "methods": [
+          {
+            "name": "mint_permission",
+            "selector": "praxis_permissions::mint_permission",
+            "export": "axiom_contract::praxis_permissions::mint_permission",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "principal",
+                "ty": "i32"
+              },
+              {
+                "name": "agent",
+                "ty": "i32"
+              },
+              {
+                "name": "max_spend",
+                "ty": "i64"
+              },
+              {
+                "name": "valid_until",
+                "ty": "i64"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "record_action",
+            "selector": "praxis_permissions::record_action",
+            "export": "axiom_contract::praxis_permissions::record_action",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "amount_spent",
+                "ty": "i64"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "revoke_permission",
+            "selector": "praxis_permissions::revoke_permission",
+            "export": "axiom_contract::praxis_permissions::revoke_permission",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              },
+              {
+                "name": "current_time",
+                "ty": "i64"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_status",
+            "selector": "praxis_permissions::get_status",
+            "export": "axiom_contract::praxis_permissions::get_status",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_principal",
+            "selector": "praxis_permissions::get_principal",
+            "export": "axiom_contract::praxis_permissions::get_principal",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_agent",
+            "selector": "praxis_permissions::get_agent",
+            "export": "axiom_contract::praxis_permissions::get_agent",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i32"
+          },
+          {
+            "name": "get_max_spend",
+            "selector": "praxis_permissions::get_max_spend",
+            "export": "axiom_contract::praxis_permissions::get_max_spend",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_valid_until",
+            "selector": "praxis_permissions::get_valid_until",
+            "export": "axiom_contract::praxis_permissions::get_valid_until",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_total_spent",
+            "selector": "praxis_permissions::get_total_spent",
+            "export": "axiom_contract::praxis_permissions::get_total_spent",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_action_count",
+            "selector": "praxis_permissions::get_action_count",
+            "export": "axiom_contract::praxis_permissions::get_action_count",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_created_at",
+            "selector": "praxis_permissions::get_created_at",
+            "export": "axiom_contract::praxis_permissions::get_created_at",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          },
+          {
+            "name": "get_revoked_at",
+            "selector": "praxis_permissions::get_revoked_at",
+            "export": "axiom_contract::praxis_permissions::get_revoked_at",
+            "params": [
+              {
+                "name": "token_id",
+                "ty": "i32"
+              }
+            ],
+            "return_type": "i64"
+          }
+        ]
+      }
+    ],
+    "free_functions": [
+      {
+        "name": "main",
+        "export": "main",
+        "params": [
+          {
+            "name": "sender",
+            "ty": "i32"
+          },
+          {
+            "name": "recipient",
+            "ty": "i32"
+          },
+          {
+            "name": "amount",
+            "ty": "i64"
+          },
+          {
+            "name": "timestamp",
+            "ty": "i64"
+          },
+          {
+            "name": "metadata",
+            "ty": "i32"
+          },
+          {
+            "name": "nonce",
+            "ty": "i64"
+          },
+          {
+            "name": "signature",
+            "ty": "i32"
+          },
+          {
+            "name": "sender_pubkey",
+            "ty": "i32"
+          },
+          {
+            "name": "memo",
+            "ty": "i32"
+          }
+        ],
+        "return_type": "i64"
+      }
+    ],
+    "host_functions": [
+      "std_runtime::map_get",
+      "std_runtime::map_put"
+    ]
+  }
+}
