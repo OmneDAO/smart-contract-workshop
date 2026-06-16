@@ -40,7 +40,7 @@
 #   5 = out_of_allowlist (allowlist enabled and counterparty not authorized)
 # ---------------------------------------------------------------------------
 
-module: praxis_permissions
+module: cinchor_permissions
 
 state:
     permission_status: map<address, uint128>
