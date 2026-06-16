@@ -2,20 +2,20 @@
   "metadata": {
     "metadata_version": "1.0",
     "compiler_version": "0.1.0",
-    "generated_at": "2026-06-13T23:21:31.170798+00:00",
+    "generated_at": "2026-06-16T19:51:59.327621+00:00",
     "source_path": "praxis.yml",
-    "wasm_sha256": "7b62af3e1aa37967008d41f99a2afc3309b0f0c933da37e7548f4a64f2d89fcb",
-    "wasm_size_bytes": 7711,
+    "wasm_sha256": "6ba9ab5cfbfe838a5efeb0ed773dfa2dedf8b376db96bd7649943fb1d63dd777",
+    "wasm_size_bytes": 7868,
     "contracts": [
       {
-        "name": "praxis_permissions",
+        "name": "cinchor_permissions",
         "params": [],
         "storage": [],
         "methods": [
           {
             "name": "mint_permission",
-            "selector": "praxis_permissions::mint_permission",
-            "export": "axiom_contract::praxis_permissions::mint_permission",
+            "selector": "cinchor_permissions::mint_permission",
+            "export": "axiom_contract::cinchor_permissions::mint_permission",
             "params": [
               {
                 "name": "token_id",
@@ -50,8 +50,8 @@
           },
           {
             "name": "add_allowed_counterparty",
-            "selector": "praxis_permissions::add_allowed_counterparty",
-            "export": "axiom_contract::praxis_permissions::add_allowed_counterparty",
+            "selector": "cinchor_permissions::add_allowed_counterparty",
+            "export": "axiom_contract::cinchor_permissions::add_allowed_counterparty",
             "params": [
               {
                 "name": "token_id",
@@ -70,8 +70,8 @@
           },
           {
             "name": "update_policy",
-            "selector": "praxis_permissions::update_policy",
-            "export": "axiom_contract::praxis_permissions::update_policy",
+            "selector": "cinchor_permissions::update_policy",
+            "export": "axiom_contract::cinchor_permissions::update_policy",
             "params": [
               {
                 "name": "token_id",
@@ -94,8 +94,8 @@
           },
           {
             "name": "record_action",
-            "selector": "praxis_permissions::record_action",
-            "export": "axiom_contract::praxis_permissions::record_action",
+            "selector": "cinchor_permissions::record_action",
+            "export": "axiom_contract::cinchor_permissions::record_action",
             "params": [
               {
                 "name": "token_id",
@@ -118,8 +118,8 @@
           },
           {
             "name": "revoke_permission",
-            "selector": "praxis_permissions::revoke_permission",
-            "export": "axiom_contract::praxis_permissions::revoke_permission",
+            "selector": "cinchor_permissions::revoke_permission",
+            "export": "axiom_contract::cinchor_permissions::revoke_permission",
             "params": [
               {
                 "name": "token_id",
@@ -134,8 +134,8 @@
           },
           {
             "name": "record_attestation",
-            "selector": "praxis_permissions::record_attestation",
-            "export": "axiom_contract::praxis_permissions::record_attestation",
+            "selector": "cinchor_permissions::record_attestation",
+            "export": "axiom_contract::cinchor_permissions::record_attestation",
             "params": [
               {
                 "name": "attestation_id",
@@ -162,8 +162,8 @@
           },
           {
             "name": "get_status",
-            "selector": "praxis_permissions::get_status",
-            "export": "axiom_contract::praxis_permissions::get_status",
+            "selector": "cinchor_permissions::get_status",
+            "export": "axiom_contract::cinchor_permissions::get_status",
             "params": [
               {
                 "name": "token_id",
@@ -174,8 +174,8 @@
           },
           {
             "name": "get_principal",
-            "selector": "praxis_permissions::get_principal",
-            "export": "axiom_contract::praxis_permissions::get_principal",
+            "selector": "cinchor_permissions::get_principal",
+            "export": "axiom_contract::cinchor_permissions::get_principal",
             "params": [
               {
                 "name": "token_id",
@@ -186,8 +186,8 @@
           },
           {
             "name": "get_agent",
-            "selector": "praxis_permissions::get_agent",
-            "export": "axiom_contract::praxis_permissions::get_agent",
+            "selector": "cinchor_permissions::get_agent",
+            "export": "axiom_contract::cinchor_permissions::get_agent",
             "params": [
               {
                 "name": "token_id",
@@ -198,8 +198,8 @@
           },
           {
             "name": "get_max_spend",
-            "selector": "praxis_permissions::get_max_spend",
-            "export": "axiom_contract::praxis_permissions::get_max_spend",
+            "selector": "cinchor_permissions::get_max_spend",
+            "export": "axiom_contract::cinchor_permissions::get_max_spend",
             "params": [
               {
                 "name": "token_id",
@@ -210,8 +210,8 @@
           },
           {
             "name": "get_valid_until",
-            "selector": "praxis_permissions::get_valid_until",
-            "export": "axiom_contract::praxis_permissions::get_valid_until",
+            "selector": "cinchor_permissions::get_valid_until",
+            "export": "axiom_contract::cinchor_permissions::get_valid_until",
             "params": [
               {
                 "name": "token_id",
@@ -222,8 +222,8 @@
           },
           {
             "name": "get_total_spent",
-            "selector": "praxis_permissions::get_total_spent",
-            "export": "axiom_contract::praxis_permissions::get_total_spent",
+            "selector": "cinchor_permissions::get_total_spent",
+            "export": "axiom_contract::cinchor_permissions::get_total_spent",
             "params": [
               {
                 "name": "token_id",
@@ -234,8 +234,8 @@
           },
           {
             "name": "get_action_count",
-            "selector": "praxis_permissions::get_action_count",
-            "export": "axiom_contract::praxis_permissions::get_action_count",
+            "selector": "cinchor_permissions::get_action_count",
+            "export": "axiom_contract::cinchor_permissions::get_action_count",
             "params": [
               {
                 "name": "token_id",
@@ -246,8 +246,8 @@
           },
           {
             "name": "get_created_at",
-            "selector": "praxis_permissions::get_created_at",
-            "export": "axiom_contract::praxis_permissions::get_created_at",
+            "selector": "cinchor_permissions::get_created_at",
+            "export": "axiom_contract::cinchor_permissions::get_created_at",
             "params": [
               {
                 "name": "token_id",
@@ -258,8 +258,8 @@
           },
           {
             "name": "get_revoked_at",
-            "selector": "praxis_permissions::get_revoked_at",
-            "export": "axiom_contract::praxis_permissions::get_revoked_at",
+            "selector": "cinchor_permissions::get_revoked_at",
+            "export": "axiom_contract::cinchor_permissions::get_revoked_at",
             "params": [
               {
                 "name": "token_id",
@@ -270,8 +270,8 @@
           },
           {
             "name": "get_policy_version",
-            "selector": "praxis_permissions::get_policy_version",
-            "export": "axiom_contract::praxis_permissions::get_policy_version",
+            "selector": "cinchor_permissions::get_policy_version",
+            "export": "axiom_contract::cinchor_permissions::get_policy_version",
             "params": [
               {
                 "name": "token_id",
@@ -282,8 +282,8 @@
           },
           {
             "name": "get_allowlist_enabled",
-            "selector": "praxis_permissions::get_allowlist_enabled",
-            "export": "axiom_contract::praxis_permissions::get_allowlist_enabled",
+            "selector": "cinchor_permissions::get_allowlist_enabled",
+            "export": "axiom_contract::cinchor_permissions::get_allowlist_enabled",
             "params": [
               {
                 "name": "token_id",
@@ -294,8 +294,8 @@
           },
           {
             "name": "is_counterparty_allowed",
-            "selector": "praxis_permissions::is_counterparty_allowed",
-            "export": "axiom_contract::praxis_permissions::is_counterparty_allowed",
+            "selector": "cinchor_permissions::is_counterparty_allowed",
+            "export": "axiom_contract::cinchor_permissions::is_counterparty_allowed",
             "params": [
               {
                 "name": "counterparty_key",
@@ -306,8 +306,8 @@
           },
           {
             "name": "get_attestation_exists",
-            "selector": "praxis_permissions::get_attestation_exists",
-            "export": "axiom_contract::praxis_permissions::get_attestation_exists",
+            "selector": "cinchor_permissions::get_attestation_exists",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_exists",
             "params": [
               {
                 "name": "attestation_id",
@@ -318,8 +318,8 @@
           },
           {
             "name": "get_attestation_context_hash",
-            "selector": "praxis_permissions::get_attestation_context_hash",
-            "export": "axiom_contract::praxis_permissions::get_attestation_context_hash",
+            "selector": "cinchor_permissions::get_attestation_context_hash",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_context_hash",
             "params": [
               {
                 "name": "attestation_id",
@@ -330,8 +330,8 @@
           },
           {
             "name": "get_attestation_policy_version",
-            "selector": "praxis_permissions::get_attestation_policy_version",
-            "export": "axiom_contract::praxis_permissions::get_attestation_policy_version",
+            "selector": "cinchor_permissions::get_attestation_policy_version",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_policy_version",
             "params": [
               {
                 "name": "attestation_id",
@@ -342,8 +342,8 @@
           },
           {
             "name": "get_attestation_verdict",
-            "selector": "praxis_permissions::get_attestation_verdict",
-            "export": "axiom_contract::praxis_permissions::get_attestation_verdict",
+            "selector": "cinchor_permissions::get_attestation_verdict",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_verdict",
             "params": [
               {
                 "name": "attestation_id",
@@ -354,8 +354,8 @@
           },
           {
             "name": "get_attestation_time",
-            "selector": "praxis_permissions::get_attestation_time",
-            "export": "axiom_contract::praxis_permissions::get_attestation_time",
+            "selector": "cinchor_permissions::get_attestation_time",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_time",
             "params": [
               {
                 "name": "attestation_id",
@@ -366,8 +366,8 @@
           },
           {
             "name": "get_attestation_count",
-            "selector": "praxis_permissions::get_attestation_count",
-            "export": "axiom_contract::praxis_permissions::get_attestation_count",
+            "selector": "cinchor_permissions::get_attestation_count",
+            "export": "axiom_contract::cinchor_permissions::get_attestation_count",
             "params": [
               {
                 "name": "token_id",

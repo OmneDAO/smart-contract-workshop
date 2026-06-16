@@ -3,57 +3,57 @@
 # Compiles to praxis.wasm + praxis.json (metadata + ABI).
 # ---------------------------------------------------------------------------
 
-contract: praxis_permissions
+contract: cinchor_permissions
 version: 0.3.0
 modules:
-  - name: praxis_permissions
+  - name: cinchor_permissions
     path: praxis.pysub
 entrypoints:
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: mint_permission
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: add_allowed_counterparty
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: update_policy
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: record_action
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: revoke_permission
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: record_attestation
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_status
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_principal
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_agent
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_max_spend
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_valid_until
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_total_spent
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_action_count
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_created_at
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_revoked_at
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_policy_version
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_allowlist_enabled
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: is_counterparty_allowed
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_exists
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_context_hash
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_policy_version
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_verdict
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_time
-  - module: praxis_permissions
+  - module: cinchor_permissions
     name: get_attestation_count
