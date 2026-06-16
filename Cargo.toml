@@ -1,6 +1,7 @@
 [workspace]
+# The pysub-compiler crate moved to omne-foundry (the canonical contract
+# toolchain). This workspace now holds only the runtime fixtures.
 members = [
-    "compiler",
     "runtime"
 ]
 
