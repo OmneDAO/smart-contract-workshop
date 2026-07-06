@@ -2,10 +2,10 @@
   "metadata": {
     "metadata_version": "1.0",
     "compiler_version": "0.1.0",
-    "generated_at": "2026-07-06T19:22:05.106295+00:00",
+    "generated_at": "2026-07-06T23:24:30.103657+00:00",
     "source_path": "praxis.yml",
-    "wasm_sha256": "65c40668e86012f66c48ad6a060900106be66a0e0d85631b607d710703461964",
-    "wasm_size_bytes": 10978,
+    "wasm_sha256": "e9a5bec7572b0e29600d34f3a6f8be97b56d21cd7b51957ababe93e86688f477",
+    "wasm_size_bytes": 11135,
     "contracts": [
       {
         "name": "cinchor_permissions",
@@ -112,6 +112,10 @@
               {
                 "name": "current_time",
                 "ty": "i64"
+              },
+              {
+                "name": "action_id",
+                "ty": "i32"
               }
             ],
             "return_type": "i64"
