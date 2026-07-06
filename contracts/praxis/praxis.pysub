@@ -38,14 +38,33 @@
 #   3 = expired         (current_time > valid_until)
 #   4 = over_budget     (total_spent + amount_spent > max_spend)
 #   5 = out_of_allowlist (allowlist enabled and counterparty not authorized)
+#   6 = unauthorized    (caller is not the token's designated agent)
 # ---------------------------------------------------------------------------
 
 module: cinchor_permissions
+
+# Caller-binding: AgentBind serializes to the length-prefixed concatenation of
+# its two address fields, so sha256(AgentBind(token, who)) is an on-chain
+# content commitment to the (token, who) pair. Stored as a map key at mint and
+# re-derived from the un-forgeable get_caller() at each mutating call — this is
+# how per-token caller identity is enforced without an address-equality
+# primitive (which pysub lacks). NOTE: get_caller() MUST be bound to an
+# address-typed local before use in the struct literal; an inline get_caller()
+# serializes as a 4-byte pointer, not its 36-byte content.
+structs:
+    AgentBind:
+        token: address
+        who: address
 
 state:
     permission_status: map<address, uint128>
     permission_principal: map<address, address>
     permission_agent: map<address, address>
+    # who may act (agent) / administer (principal) each token, keyed by
+    # sha256(AgentBind(token_id, address)). Written at mint, checked on every
+    # mutating call. On a fresh contract every token has both binds.
+    permission_agent_bind: map<bytes, uint128>
+    permission_principal_bind: map<bytes, uint128>
     permission_max_spend: map<address, uint128>
     permission_valid_until: map<address, uint128>
     permission_total_spent: map<address, uint128>
@@ -89,6 +108,8 @@ fn mint_permission(token_id: address, principal: address, agent: address, max_sp
     permission_created_at[token_id] = current_time
     permission_policy_version[token_id] = 1
     permission_allowlist_enabled[token_id] = allowlist_enabled
+    permission_agent_bind[sha256(AgentBind(token=token_id, who=agent))] = 1
+    permission_principal_bind[sha256(AgentBind(token=token_id, who=principal))] = 1
     return 1
 
 # Principal authorizes a counterparty for a permission's allowlist. counterparty_key
@@ -99,6 +120,10 @@ fn add_allowed_counterparty(token_id: address, counterparty_key: address, curren
     let status: uint128 = permission_status[token_id]
     if status != 1:
         return 0
+    let cp_caller: address = get_caller()
+    let cp_probe: bytes = sha256(AgentBind(token=token_id, who=cp_caller))
+    if permission_principal_bind[cp_probe] != 1:
+        return 0
     permission_allowlist[counterparty_key] = 1
     return 1
 
@@ -108,6 +133,10 @@ fn add_allowed_counterparty(token_id: address, counterparty_key: address, curren
 fn update_policy(token_id: address, new_max_spend: uint128, new_valid_until: uint128, current_time: uint128) -> uint128:
     let status: uint128 = permission_status[token_id]
     if status != 1:
+        return 0
+    let up_caller: address = get_caller()
+    let up_probe: bytes = sha256(AgentBind(token=token_id, who=up_caller))
+    if permission_principal_bind[up_probe] != 1:
         return 0
     permission_max_spend[token_id] = new_max_spend
     permission_valid_until[token_id] = new_valid_until
@@ -127,6 +156,10 @@ fn record_action(token_id: address, amount_spent: uint128, counterparty_key: add
         return 0
     if status == 2:
         return 2
+    let act_caller: address = get_caller()
+    let act_probe: bytes = sha256(AgentBind(token=token_id, who=act_caller))
+    if permission_agent_bind[act_probe] != 1:
+        return 6
     let valid_until: uint128 = permission_valid_until[token_id]
     if current_time > valid_until:
         return 3
@@ -152,6 +185,10 @@ fn revoke_permission(token_id: address, current_time: uint128) -> uint128:
     let status: uint128 = permission_status[token_id]
     if status != 1:
         return 0
+    let rev_caller: address = get_caller()
+    let rev_probe: bytes = sha256(AgentBind(token=token_id, who=rev_caller))
+    if permission_principal_bind[rev_probe] != 1:
+        return 0
     permission_status[token_id] = 2
     permission_revoked_at[token_id] = current_time
     return 1
@@ -168,6 +205,10 @@ fn record_attestation(attestation_id: address, token_id: address, context_hash: 
         return 0
     let status: uint128 = permission_status[token_id]
     if status == 0:
+        return 0
+    let att_caller: address = get_caller()
+    let att_probe: bytes = sha256(AgentBind(token=token_id, who=att_caller))
+    if permission_agent_bind[att_probe] != 1:
         return 0
     attestation_exists[attestation_id] = 1
     attestation_token[attestation_id] = token_id

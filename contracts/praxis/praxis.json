@@ -2,10 +2,10 @@
   "metadata": {
     "metadata_version": "1.0",
     "compiler_version": "0.1.0",
-    "generated_at": "2026-06-16T19:51:59.327621+00:00",
+    "generated_at": "2026-07-06T19:22:05.106295+00:00",
     "source_path": "praxis.yml",
-    "wasm_sha256": "6ba9ab5cfbfe838a5efeb0ed773dfa2dedf8b376db96bd7649943fb1d63dd777",
-    "wasm_size_bytes": 7868,
+    "wasm_sha256": "65c40668e86012f66c48ad6a060900106be66a0e0d85631b607d710703461964",
+    "wasm_size_bytes": 10978,
     "contracts": [
       {
         "name": "cinchor_permissions",
@@ -425,6 +425,9 @@
       }
     ],
     "host_functions": [
+      "axiom_memory::deterministic_malloc",
+      "std_runtime::get_caller",
+      "std_crypto::sha256",
       "std_runtime::map_get",
       "std_runtime::map_put"
     ]
