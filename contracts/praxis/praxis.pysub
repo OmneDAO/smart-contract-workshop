@@ -87,6 +87,12 @@ state:
     attestation_verdict: map<address, uint128>
     attestation_time: map<address, uint128>
     permission_attestation_count: map<address, uint128>
+    # Idempotency: SDK-derived unique action_id → 1 once its record_action has
+    # been APPLIED. A replay (same action_id, e.g. a worker resubmit after a
+    # crash with a reseeded nonce) short-circuits to success WITHOUT re-applying,
+    # making record_action exactly-once at the contract level. Only the success
+    # path marks this; a refused action leaves it 0 (a harmless re-evaluation).
+    action_applied: map<address, uint128>
 
 functions:
 
@@ -150,7 +156,10 @@ fn update_policy(token_id: address, new_max_spend: uint128, new_valid_until: uin
 # the action is REFUSED (no state mutation) before it commits if any fails.
 # counterparty_key is the SDK-derived SHA-256(token_id || counterparty); it is
 # ignored when allowlist_enabled == 0. Returns a typed code per the header.
-fn record_action(token_id: address, amount_spent: uint128, counterparty_key: address, current_time: uint128) -> uint128:
+fn record_action(token_id: address, amount_spent: uint128, counterparty_key: address, current_time: uint128, action_id: address) -> uint128:
+    let applied: uint128 = action_applied[action_id]
+    if applied > 0:
+        return 1
     let status: uint128 = permission_status[token_id]
     if status == 0:
         return 0
@@ -176,6 +185,7 @@ fn record_action(token_id: address, amount_spent: uint128, counterparty_key: add
     permission_total_spent[token_id] = new_total
     let count: uint128 = permission_action_count[token_id]
     permission_action_count[token_id] = count + 1
+    action_applied[action_id] = 1
     return 1
 
 # Revoke an active permission token. Terminal state. Idempotent: returns 0
